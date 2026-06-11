@@ -6,6 +6,8 @@ import Sparkle
 struct SettingsView: View {
     @AppStorage(PrefKey.folderPath) private var folderPath = ""
     @AppStorage(PrefKey.corners) private var cornersRaw = HotCorner.bottomRight.rawValue
+    @AppStorage(PrefKey.edges) private var edgesRaw = ""
+    @AppStorage(PrefKey.dragOpenRadius) private var dragOpenRadius = 130.0
     @AppStorage(PrefKey.dwell) private var dwell = 0.12
     @AppStorage(PrefKey.hotCornerEnabled) private var hotCornerEnabled = true
     @AppStorage(PrefKey.hideMargin) private var hideMargin = 220.0
@@ -33,11 +35,16 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Cantos ativos") {
-                Toggle("Abrir painel pelos cantos da tela", isOn: $hotCornerEnabled)
+            Section("Cantos e laterais") {
+                Toggle("Abrir painel pelos cantos/laterais da tela", isOn: $hotCornerEnabled)
 
                 ForEach(HotCorner.allCases) { corner in
                     Toggle(corner.label, isOn: cornerBinding(corner))
+                        .disabled(!hotCornerEnabled)
+                }
+
+                ForEach(ScreenEdge.allCases) { edge in
+                    Toggle(edge.label, isOn: edgeBinding(edge))
                         .disabled(!hotCornerEnabled)
                 }
 
@@ -47,6 +54,16 @@ struct SettingsView: View {
                     }
                     .disabled(!hotCornerEnabled)
                     Text("\(Int(dwell * 1000)) ms no canto antes de abrir")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading) {
+                    Slider(value: $dragOpenRadius, in: 50...400) {
+                        Text("Raio ao arrastar")
+                    }
+                    .disabled(!hotCornerEnabled)
+                    Text("Arrastando algo, o painel abre a ~\(Int(dragOpenRadius)) px do canto/lateral")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -171,6 +188,23 @@ struct SettingsView: View {
                     corners.remove(corner.rawValue)
                 }
                 cornersRaw = corners.sorted().joined(separator: ",")
+            }
+        )
+    }
+
+    private func edgeBinding(_ edge: ScreenEdge) -> Binding<Bool> {
+        Binding(
+            get: {
+                edgesRaw.split(separator: ",").contains(Substring(edge.rawValue))
+            },
+            set: { enabled in
+                var edges = Set(edgesRaw.split(separator: ",").map(String.init))
+                if enabled {
+                    edges.insert(edge.rawValue)
+                } else {
+                    edges.remove(edge.rawValue)
+                }
+                edgesRaw = edges.sorted().joined(separator: ",")
             }
         )
     }

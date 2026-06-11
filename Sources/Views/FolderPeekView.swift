@@ -212,7 +212,10 @@ struct FolderPeekView: View {
         } else {
             ScrollView {
                 ZStack(alignment: .topLeading) {
-                    VStack(spacing: 0) {
+                    // LazyVStack: o rodapé de "carregar mais" só é
+                    // instanciado (e dispara) quando realmente entra na
+                    // área visível, ao rolar até o fim.
+                    LazyVStack(spacing: 0) {
                         layout
                         if monitor.isTruncated {
                             LoadMoreFooter(scale: scale) {

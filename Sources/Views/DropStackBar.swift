@@ -3,27 +3,44 @@ import AppKit
 import UniformTypeIdentifiers
 
 private let paneFill = Color.primary.opacity(0.05)
+private let paneStroke = Color.primary.opacity(0.1)
+private let barSpace = "downside.stackbar"
 
 /// Faixa fixa no topo do painel com as pilhas temporárias (até 3, lado
-/// a lado), no estilo de abas de navegador: o chip expandido se funde
-/// com o painel de conteúdo logo abaixo. Trocar de pilha com uma aberta
-/// só troca o conteúdo (ágil, sem recolher/abrir).
+/// a lado), no estilo de abas de navegador: aba ativa e painel de
+/// conteúdo são UMA única forma contínua (mesma borda, mesmos cantos
+/// arredondados). Abrir revela o conteúdo crescendo para baixo; trocar
+/// de pilha desliza a "corcova" da aba e troca o conteúdo, sem fechar.
 struct DropStackBar: View {
     @EnvironmentObject private var panel: PanelController
     let scale: CGFloat
 
     @State private var expanded: UUID?
+    /// Mantém o conteúdo visível durante a animação de fechamento.
+    @State private var lastDetailID: UUID?
+    @State private var chipFrames: [UUID: CGRect] = [:]
+
+    private var detailStack: FileStack? {
+        let id = expanded ?? lastDetailID
+        return panel.stacks.first { $0.id == id }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 8 * scale) {
+            HStack(spacing: 8 * scale) {
                 ForEach(panel.stacks) { stack in
                     StackChip(
                         stack: stack,
                         scale: scale,
-                        isExpanded: expanded == stack.id,
-                        onToggleExpand: {
-                            expanded = expanded == stack.id ? nil : stack.id
+                        isActive: expanded == stack.id,
+                        onToggleExpand: { toggle(stack.id) }
+                    )
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: ChipFramesKey.self,
+                                value: [stack.id: proxy.frame(in: .named(barSpace))]
+                            )
                         }
                     )
                     .transition(.scale(scale: 0.85).combined(with: .opacity))
@@ -35,57 +52,165 @@ struct DropStackBar: View {
                         .transition(.scale(scale: 0.85).combined(with: .opacity))
                 }
             }
-            .zIndex(1)
 
-            if let id = expanded, let stack = panel.stacks.first(where: { $0.id == id }) {
-                StackDetail(stack: stack, scale: scale) {
-                    expanded = nil
+            // Painel de conteúdo persistente: a altura anima (revelação,
+            // sem esticar o conteúdo), então nada pisca no fim.
+            Group {
+                if let stack = detailStack {
+                    StackDetailContent(stack: stack, scale: scale) {
+                        toggle(stack.id)
+                    }
+                    .id(stack.id)
                 }
-                .id(stack.id)
-                .transition(.expandDown)
             }
+            .frame(maxHeight: expanded == nil ? 0 : nil, alignment: .top)
+            .clipped()
+            .opacity(expanded == nil ? 0 : 1)
+            .allowsHitTesting(expanded != nil)
         }
+        .background(unifiedTabBackground)
+        .coordinateSpace(name: barSpace)
+        .onPreferenceChange(ChipFramesKey.self) { chipFrames = $0 }
         .padding(.horizontal, 12 * scale)
         .padding(.bottom, 6 * scale)
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.stacks)
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.isDraggingFromPanel)
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.externalDragActive)
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: expanded)
+        .animation(.spring(response: 0.34, dampingFraction: 0.84), value: expanded)
         .onChange(of: panel.stacks) { _, stacks in
             if let id = expanded, !stacks.contains(where: { $0.id == id }) {
                 expanded = nil
             }
         }
     }
-}
 
-/// O retângulo da pilha "cresce para baixo" ao abrir.
-private struct VerticalExpandModifier: ViewModifier {
-    let progress: CGFloat
+    private func toggle(_ id: UUID) {
+        if expanded == id {
+            expanded = nil
+        } else {
+            expanded = id
+            lastDetailID = id
+        }
+    }
 
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(x: 1, y: max(progress, 0.01), anchor: .top)
-            .opacity(Double(progress))
+    /// Forma única aba+painel: fica atrás dos chips e do conteúdo,
+    /// desenhada com a "corcova" sob a aba ativa. Some em fade no
+    /// fechamento, enquanto o fundo próprio do chip volta em fade.
+    @ViewBuilder
+    private var unifiedTabBackground: some View {
+        GeometryReader { proxy in
+            if let id = expanded ?? lastDetailID, let tab = chipFrames[id] {
+                let shape = TabPaneShape(
+                    tabMinX: tab.minX,
+                    tabMaxX: tab.maxX,
+                    paneTop: tab.maxY,
+                    radius: 10
+                )
+                ZStack {
+                    shape.fill(paneFill)
+                    shape.stroke(paneStroke, lineWidth: 1)
+                }
+                .opacity(expanded == nil ? 0 : 1)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+        }
     }
 }
 
-private extension AnyTransition {
-    static let expandDown = AnyTransition.modifier(
-        active: VerticalExpandModifier(progress: 0),
-        identity: VerticalExpandModifier(progress: 1)
-    )
+private struct ChipFramesKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+/// Contorno contínuo de aba + painel (estilo aba de navegador), com a
+/// posição da aba animável — trocar de pilha desliza a corcova.
+struct TabPaneShape: Shape {
+    var tabMinX: CGFloat
+    var tabMaxX: CGFloat
+    var paneTop: CGFloat
+    var radius: CGFloat = 10
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(tabMinX, tabMaxX) }
+        set {
+            tabMinX = newValue.first
+            tabMaxX = newValue.second
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let r = radius
+        let top = min(paneTop, rect.maxY)
+        let minX = max(rect.minX, min(tabMinX, rect.maxX - 2 * r))
+        let maxX = min(rect.maxX, max(tabMaxX, minX + 2 * r))
+        // Painel ainda fechado (altura ~zero): desenha só a aba.
+        let paneVisible = rect.maxY - top > 1
+
+        var path = Path()
+        path.move(to: CGPoint(x: minX, y: rect.minY + r))
+        path.addArc(
+            center: CGPoint(x: minX + r, y: rect.minY + r),
+            radius: r, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false
+        )
+        path.addLine(to: CGPoint(x: maxX - r, y: rect.minY))
+        path.addArc(
+            center: CGPoint(x: maxX - r, y: rect.minY + r),
+            radius: r, startAngle: .degrees(270), endAngle: .degrees(0), clockwise: false
+        )
+        path.addLine(to: CGPoint(x: maxX, y: top))
+
+        if paneVisible {
+            if maxX < rect.maxX - r {
+                path.addLine(to: CGPoint(x: rect.maxX - r, y: top))
+                path.addArc(
+                    center: CGPoint(x: rect.maxX - r, y: top + r),
+                    radius: r, startAngle: .degrees(270), endAngle: .degrees(0), clockwise: false
+                )
+            } else {
+                path.addLine(to: CGPoint(x: rect.maxX, y: top))
+            }
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
+            path.addArc(
+                center: CGPoint(x: rect.maxX - r, y: rect.maxY - r),
+                radius: r, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false
+            )
+            path.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+            path.addArc(
+                center: CGPoint(x: rect.minX + r, y: rect.maxY - r),
+                radius: r, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false
+            )
+            if minX > rect.minX + r {
+                path.addLine(to: CGPoint(x: rect.minX, y: top + r))
+                path.addArc(
+                    center: CGPoint(x: rect.minX + r, y: top + r),
+                    radius: r, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false
+                )
+                path.addLine(to: CGPoint(x: minX, y: top))
+            } else {
+                path.addLine(to: CGPoint(x: rect.minX, y: top))
+                path.addLine(to: CGPoint(x: minX, y: top))
+            }
+        } else {
+            path.addLine(to: CGPoint(x: minX, y: top))
+        }
+
+        path.addLine(to: CGPoint(x: minX, y: rect.minY + r))
+        path.closeSubpath()
+        return path
+    }
 }
 
 /// Pilha compacta (a "aba"): ícones em leque + contagem. Clique só
-/// expande/recolhe; arrastar leva tudo; segurar um arrasto em cima por
-/// alguns segundos substitui o conteúdo (com preenchimento de progresso
-/// no fundo).
+/// expande/recolhe; arrastar leva tudo; segurar um arrasto em cima
+/// substitui o conteúdo (com preenchimento de progresso no fundo).
 private struct StackChip: View {
     @EnvironmentObject private var panel: PanelController
     let stack: FileStack
     let scale: CGFloat
-    let isExpanded: Bool
+    let isActive: Bool
     let onToggleExpand: () -> Void
 
     @State private var targeted = false
@@ -119,14 +244,12 @@ private struct StackChip: View {
                 .padding(.vertical, 2 * scale)
                 .background(Capsule().fill(Color.accentColor))
 
-            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+            Image(systemName: isActive ? "chevron.up" : "chevron.down")
                 .font(.system(size: 8 * scale, weight: .semibold))
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 8 * scale)
-        .padding(.top, 5 * scale)
-        // A aba ativa desce até encostar no painel de conteúdo.
-        .padding(.bottom, isExpanded ? 11 * scale : 5 * scale)
+        .padding(.vertical, 5 * scale)
         .frame(maxWidth: .infinity)
         .background(chipBackground)
         .scaleEffect(targeted ? 1.05 : 1)
@@ -160,19 +283,17 @@ private struct StackChip: View {
         .help("Clique para ver o conteúdo · arraste para levar tudo · segure um arrasto para substituir")
     }
 
-    @ViewBuilder
+    /// Fundo próprio do chip: some quando a aba está ativa (a forma
+    /// unificada assume), volta em fade no fechamento. Progresso do
+    /// segurar-para-substituir e highlight de drop ficam por cima.
     private var chipBackground: some View {
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 10,
-            bottomLeadingRadius: isExpanded ? 0 : 10,
-            bottomTrailingRadius: isExpanded ? 0 : 10,
-            topTrailingRadius: 10,
-            style: .continuous
-        )
-        ZStack(alignment: .leading) {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return ZStack(alignment: .leading) {
             shape.fill(targeted ? Color.accentColor.opacity(0.13) : paneFill)
+                .opacity(isActive ? (targeted ? 1 : 0) : 1)
+            shape.strokeBorder(paneStroke, lineWidth: 1)
+                .opacity(isActive ? 0 : 1)
 
-            // Preenchimento de progresso do "segurar para substituir".
             if replaceProgress > 0 {
                 GeometryReader { proxy in
                     Rectangle()
@@ -182,11 +303,8 @@ private struct StackChip: View {
                 .clipShape(shape)
             }
 
-            if !isExpanded {
-                shape.strokeBorder(
-                    targeted ? Color.accentColor : Color.primary.opacity(0.08),
-                    lineWidth: 1
-                )
+            if targeted {
+                shape.strokeBorder(Color.accentColor, lineWidth: 1)
             }
         }
     }
@@ -285,9 +403,9 @@ private struct NewStackTarget: View {
     }
 }
 
-/// Painel de conteúdo da aba: lista com previews, itens entrando em
-/// cascata; cantos superiores retos sob a aba ativa (fusão visual).
-private struct StackDetail: View {
+/// Conteúdo do painel da aba: lista com previews em cascata sutil.
+/// Sem fundo próprio — a forma unificada da barra cuida do visual.
+private struct StackDetailContent: View {
     @EnvironmentObject private var panel: PanelController
     let stack: FileStack
     let scale: CGFloat
@@ -301,12 +419,11 @@ private struct StackDetail: View {
                 LazyVStack(spacing: 2) {
                     ForEach(Array(stack.urls.enumerated()), id: \.element) { index, url in
                         row(url)
-                            .offset(y: appeared ? 0 : -12)
+                            .offset(y: appeared ? 0 : -8)
                             .opacity(appeared ? 1 : 0)
-                            .rotationEffect(.degrees(appeared ? 0 : Double(min(index, 6)) * 1.5 - 1.5))
                             .animation(
-                                .spring(response: 0.32, dampingFraction: 0.74)
-                                    .delay(Double(min(index, 10)) * 0.028),
+                                .spring(response: 0.3, dampingFraction: 0.78)
+                                    .delay(Double(min(index, 10)) * 0.025),
                                 value: appeared
                             )
                     }
@@ -333,16 +450,6 @@ private struct StackDetail: View {
             .padding(.vertical, 5 * scale)
         }
         .frame(maxWidth: .infinity)
-        .background(
-            UnevenRoundedRectangle(
-                topLeadingRadius: 6,
-                bottomLeadingRadius: 10,
-                bottomTrailingRadius: 10,
-                topTrailingRadius: 6,
-                style: .continuous
-            )
-            .fill(paneFill)
-        )
         .onAppear { appeared = true }
     }
 

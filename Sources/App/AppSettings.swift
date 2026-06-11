@@ -74,6 +74,21 @@ enum ViewMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Laterais da tela que também podem abrir o painel.
+enum ScreenEdge: String, CaseIterable, Identifiable {
+    case left
+    case right
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .left: return "Lateral esquerda"
+        case .right: return "Lateral direita"
+        }
+    }
+}
+
 /// Categorias de conteúdo do preview, para ajuste de tamanho individual.
 enum PreviewCategory: String, CaseIterable, Identifiable {
     case image, pdf, text, table, folder, audio
@@ -100,7 +115,10 @@ enum PrefKey {
     static let corner = "hotCorner"
     /// Cantos ativos, separados por vírgula.
     static let corners = "hotCorners"
+    /// Laterais ativas, separadas por vírgula.
+    static let edges = "hotEdges"
     static let dwell = "hotCornerDwell"
+    static let dragOpenRadius = "dragOpenRadius"
     static let hotCornerEnabled = "hotCornerEnabled"
     static let hideMargin = "hideMargin"
     static let autoHideEnabled = "autoHideOnLeave"
@@ -136,6 +154,18 @@ enum Prefs {
             return [corner]
         }
         return [.bottomRight]
+    }
+
+    static var edges: Set<ScreenEdge> {
+        guard let raw = UserDefaults.standard.string(forKey: PrefKey.edges) else { return [] }
+        return Set(raw.split(separator: ",").compactMap { ScreenEdge(rawValue: String($0)) })
+    }
+
+    /// Raio ao redor do canto/lateral que abre o painel durante arrastos.
+    static var dragOpenRadius: CGFloat {
+        let value = UserDefaults.standard.double(forKey: PrefKey.dragOpenRadius)
+        guard value >= 50, value <= 400 else { return 130 }
+        return CGFloat(value)
     }
 
     static var dwell: TimeInterval {

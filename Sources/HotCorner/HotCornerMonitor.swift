@@ -39,21 +39,40 @@ final class HotCornerMonitor {
             return
         }
 
+        let frame = screen.frame
         let corners = Prefs.corners
+        let edges = Prefs.edges
         let dragging = NSEvent.pressedMouseButtons != 0
 
-        // Durante um arrasto (de qualquer app), basta entrar num raio
-        // imaginário ao redor do canto para o painel abrir na hora.
-        let active: HotCorner?
+        // Cantos têm prioridade; laterais (se ativadas) abrem ancorando
+        // no canto mais próximo da metade da tela em que o mouse está.
+        // Durante um arrasto vale um raio configurável, para o painel
+        // abrir antes de encostar.
+        var active: HotCorner?
         if dragging {
+            let radius = Prefs.dragOpenRadius
             active = corners.first { corner in
-                let point = corner.point(in: screen.frame)
+                let point = corner.point(in: frame)
                 let dx = mouse.x - point.x
                 let dy = mouse.y - point.y
-                return (dx * dx + dy * dy).squareRoot() <= 130
+                return (dx * dx + dy * dy).squareRoot() <= radius
+            }
+            if active == nil {
+                if edges.contains(.left), mouse.x - frame.minX <= radius {
+                    active = mouse.y < frame.midY ? .bottomLeft : .topLeft
+                } else if edges.contains(.right), frame.maxX - mouse.x <= radius {
+                    active = mouse.y < frame.midY ? .bottomRight : .topRight
+                }
             }
         } else {
-            active = corners.first { $0.zone(in: screen.frame, size: 6).contains(mouse) }
+            active = corners.first { $0.zone(in: frame, size: 6).contains(mouse) }
+            if active == nil {
+                if edges.contains(.left), mouse.x <= frame.minX + 2 {
+                    active = mouse.y < frame.midY ? .bottomLeft : .topLeft
+                } else if edges.contains(.right), mouse.x >= frame.maxX - 2 {
+                    active = mouse.y < frame.midY ? .bottomRight : .topRight
+                }
+            }
         }
 
         if let corner = active {
