@@ -17,6 +17,16 @@ enum HotCorner: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Ponto exato do canto, em coordenadas globais.
+    func point(in screenFrame: NSRect) -> NSPoint {
+        switch self {
+        case .bottomLeft: return NSPoint(x: screenFrame.minX, y: screenFrame.minY)
+        case .bottomRight: return NSPoint(x: screenFrame.maxX, y: screenFrame.minY)
+        case .topLeft: return NSPoint(x: screenFrame.minX, y: screenFrame.maxY)
+        case .topRight: return NSPoint(x: screenFrame.maxX, y: screenFrame.maxY)
+        }
+    }
+
     /// Zona quente do canto, em coordenadas globais da tela.
     func zone(in screenFrame: NSRect, size: CGFloat) -> NSRect {
         switch self {
@@ -99,6 +109,7 @@ enum PrefKey {
     static let hoverPreviewEnabled = "hoverPreviewEnabled"
     static let hoverPreviewDelay = "hoverPreviewDelay"
     static let hoverPreviewSize = "hoverPreviewSize"
+    static let stackReplaceDelay = "stackReplaceDelay"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -176,6 +187,14 @@ enum Prefs {
         let value = UserDefaults.standard.double(forKey: PrefKey.hoverPreviewSize)
         guard value >= 0.7, value <= 1.8 else { return 1.0 }
         return CGFloat(value)
+    }
+
+    /// Tempo segurando um arrasto sobre uma pilha para substituir o
+    /// conteúdo dela.
+    static var stackReplaceDelay: TimeInterval {
+        let value = UserDefaults.standard.double(forKey: PrefKey.stackReplaceDelay)
+        guard value >= 1, value <= 6 else { return 3.0 }
+        return value
     }
 
     /// Ajuste fino de tamanho do preview por categoria de arquivo,

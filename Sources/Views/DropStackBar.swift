@@ -2,10 +2,12 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+private let paneFill = Color.primary.opacity(0.05)
+
 /// Faixa fixa no topo do painel com as pilhas temporárias (até 3, lado
-/// a lado). Durante um arrasto aparece também o alvo de nova pilha.
-/// Clicar numa pilha expande a seção (fundo mais claro) com o conteúdo
-/// em lista — os itens "caem" do leque um a um.
+/// a lado), no estilo de abas de navegador: o chip expandido se funde
+/// com o painel de conteúdo logo abaixo. Trocar de pilha com uma aberta
+/// só troca o conteúdo (ágil, sem recolher/abrir).
 struct DropStackBar: View {
     @EnvironmentObject private var panel: PanelController
     let scale: CGFloat
@@ -13,8 +15,8 @@ struct DropStackBar: View {
     @State private var expanded: UUID?
 
     var body: some View {
-        VStack(spacing: 6 * scale) {
-            HStack(spacing: 8 * scale) {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 8 * scale) {
                 ForEach(panel.stacks) { stack in
                     StackChip(
                         stack: stack,
@@ -33,20 +35,22 @@ struct DropStackBar: View {
                         .transition(.scale(scale: 0.85).combined(with: .opacity))
                 }
             }
+            .zIndex(1)
 
             if let id = expanded, let stack = panel.stacks.first(where: { $0.id == id }) {
                 StackDetail(stack: stack, scale: scale) {
                     expanded = nil
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .id(stack.id)
+                .transition(.expandDown)
             }
         }
         .padding(.horizontal, 12 * scale)
         .padding(.bottom, 6 * scale)
-        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: panel.stacks)
-        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: panel.isDraggingFromPanel)
-        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: panel.externalDragActive)
-        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: expanded)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.stacks)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.isDraggingFromPanel)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.externalDragActive)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: expanded)
         .onChange(of: panel.stacks) { _, stacks in
             if let id = expanded, !stacks.contains(where: { $0.id == id }) {
                 expanded = nil
@@ -55,8 +59,28 @@ struct DropStackBar: View {
     }
 }
 
-/// Pilha compacta: ícones em leque + contagem. Clique (simples ou
-/// duplo) só expande/recolhe; arrastar leva tudo.
+/// O retângulo da pilha "cresce para baixo" ao abrir.
+private struct VerticalExpandModifier: ViewModifier {
+    let progress: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(x: 1, y: max(progress, 0.01), anchor: .top)
+            .opacity(Double(progress))
+    }
+}
+
+private extension AnyTransition {
+    static let expandDown = AnyTransition.modifier(
+        active: VerticalExpandModifier(progress: 0),
+        identity: VerticalExpandModifier(progress: 1)
+    )
+}
+
+/// Pilha compacta (a "aba"): ícones em leque + contagem. Clique só
+/// expande/recolhe; arrastar leva tudo; segurar um arrasto em cima por
+/// alguns segundos substitui o conteúdo (com preenchimento de progresso
+/// no fundo).
 private struct StackChip: View {
     @EnvironmentObject private var panel: PanelController
     let stack: FileStack
@@ -65,19 +89,28 @@ private struct StackChip: View {
     let onToggleExpand: () -> Void
 
     @State private var targeted = false
+    @State private var replaceProgress: CGFloat = 0
+    @State private var replaceTask: Task<Void, Never>?
 
     var body: some View {
         HStack(spacing: 6 * scale) {
-            ZStack(alignment: .leading) {
-                ForEach(Array(stack.urls.suffix(3).enumerated()), id: \.element) { index, url in
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                        .resizable()
-                        .frame(width: 22 * scale, height: 22 * scale)
-                        .offset(x: CGFloat(index) * 6 * scale)
-                        .rotationEffect(.degrees(Double(index) * 3 - 3))
+            if stack.urls.isEmpty {
+                Image(systemName: "tray")
+                    .font(.system(size: 13 * scale))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36 * scale, alignment: .leading)
+            } else {
+                ZStack(alignment: .leading) {
+                    ForEach(Array(stack.urls.suffix(3).enumerated()), id: \.element) { index, url in
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                            .resizable()
+                            .frame(width: 22 * scale, height: 22 * scale)
+                            .offset(x: CGFloat(index) * 6 * scale)
+                            .rotationEffect(.degrees(Double(index) * 3 - 3))
+                    }
                 }
+                .frame(width: 36 * scale, alignment: .leading)
             }
-            .frame(width: 36 * scale, alignment: .leading)
 
             Text("\(stack.urls.count)")
                 .font(.system(size: 11 * scale, weight: .bold))
@@ -91,20 +124,12 @@ private struct StackChip: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 8 * scale)
-        .padding(.vertical, 5 * scale)
+        .padding(.top, 5 * scale)
+        // A aba ativa desce até encostar no painel de conteúdo.
+        .padding(.bottom, isExpanded ? 11 * scale : 5 * scale)
         .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(targeted ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.06))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(
-                    targeted ? Color.accentColor : Color.primary.opacity(0.08),
-                    lineWidth: 1
-                )
-        )
-        .scaleEffect(targeted ? 1.06 : 1)
+        .background(chipBackground)
+        .scaleEffect(targeted ? 1.05 : 1)
         .animation(.spring(response: 0.25, dampingFraction: 0.7), value: targeted)
         .overlay(
             ItemInteraction(
@@ -119,12 +144,82 @@ private struct StackChip: View {
                 onDragEnded: { panel.isDraggingFromPanel = false }
             )
         )
-        .onDrop(of: StackDropHandler.acceptedTypes, isTargeted: $targeted) { providers in
-            StackDropHandler.accept(providers) { url in
-                panel.addToStack(stack.id, url: url)
+        .onDrop(
+            of: StackDropHandler.acceptedTypes,
+            delegate: StackDropDelegate(
+                onEntered: dropEntered,
+                onExited: dropExited,
+                onPerform: { providers in
+                    dropExited()
+                    return StackDropHandler.accept(providers) { url in
+                        panel.addToStack(stack.id, url: url)
+                    }
+                }
+            )
+        )
+        .help("Clique para ver o conteúdo · arraste para levar tudo · segure um arrasto para substituir")
+    }
+
+    @ViewBuilder
+    private var chipBackground: some View {
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: 10,
+            bottomLeadingRadius: isExpanded ? 0 : 10,
+            bottomTrailingRadius: isExpanded ? 0 : 10,
+            topTrailingRadius: 10,
+            style: .continuous
+        )
+        ZStack(alignment: .leading) {
+            shape.fill(targeted ? Color.accentColor.opacity(0.13) : paneFill)
+
+            // Preenchimento de progresso do "segurar para substituir".
+            if replaceProgress > 0 {
+                GeometryReader { proxy in
+                    Rectangle()
+                        .fill(Color.accentColor.opacity(0.25))
+                        .frame(width: proxy.size.width * replaceProgress)
+                }
+                .clipShape(shape)
+            }
+
+            if !isExpanded {
+                shape.strokeBorder(
+                    targeted ? Color.accentColor : Color.primary.opacity(0.08),
+                    lineWidth: 1
+                )
             }
         }
-        .help("Clique para ver o conteúdo · arraste para levar tudo")
+    }
+
+    private func dropEntered() {
+        targeted = true
+        guard !stack.urls.isEmpty else { return }
+
+        let delay = Prefs.stackReplaceDelay
+        replaceProgress = 0
+        withAnimation(.linear(duration: delay)) {
+            replaceProgress = 1
+        }
+        let id = stack.id
+        replaceTask?.cancel()
+        replaceTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            panel.replaceStack(id)
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+            withAnimation(.easeOut(duration: 0.2)) {
+                replaceProgress = 0
+            }
+        }
+    }
+
+    private func dropExited() {
+        targeted = false
+        replaceTask?.cancel()
+        replaceTask = nil
+        withAnimation(.easeOut(duration: 0.15)) {
+            replaceProgress = 0
+        }
     }
 
     private func contextMenu() -> NSMenu {
@@ -174,17 +269,24 @@ private struct NewStackTarget: View {
         )
         .scaleEffect(targeted ? 1.04 : 1)
         .animation(.spring(response: 0.25, dampingFraction: 0.7), value: targeted)
-        .onDrop(of: StackDropHandler.acceptedTypes, isTargeted: $targeted) { providers in
-            StackDropHandler.accept(providers) { url in
-                panel.addToStack(nil, url: url)
-            }
-        }
+        .onDrop(
+            of: StackDropHandler.acceptedTypes,
+            delegate: StackDropDelegate(
+                onEntered: { targeted = true },
+                onExited: { targeted = false },
+                onPerform: { providers in
+                    targeted = false
+                    return StackDropHandler.accept(providers) { url in
+                        panel.addToStack(nil, url: url)
+                    }
+                }
+            )
+        )
     }
 }
 
-/// Seção expandida (fundo mais claro) com o conteúdo da pilha em lista,
-/// itens entrando em cascata. Linhas arrastáveis individualmente;
-/// clique duplo abre só aquele arquivo.
+/// Painel de conteúdo da aba: lista com previews, itens entrando em
+/// cascata; cantos superiores retos sob a aba ativa (fusão visual).
 private struct StackDetail: View {
     @EnvironmentObject private var panel: PanelController
     let stack: FileStack
@@ -203,8 +305,8 @@ private struct StackDetail: View {
                             .opacity(appeared ? 1 : 0)
                             .rotationEffect(.degrees(appeared ? 0 : Double(min(index, 6)) * 1.5 - 1.5))
                             .animation(
-                                .spring(response: 0.35, dampingFraction: 0.72)
-                                    .delay(Double(min(index, 10)) * 0.035),
+                                .spring(response: 0.32, dampingFraction: 0.74)
+                                    .delay(Double(min(index, 10)) * 0.028),
                                 value: appeared
                             )
                     }
@@ -230,9 +332,16 @@ private struct StackDetail: View {
             .padding(.horizontal, 8 * scale)
             .padding(.vertical, 5 * scale)
         }
+        .frame(maxWidth: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
+            UnevenRoundedRectangle(
+                topLeadingRadius: 6,
+                bottomLeadingRadius: 10,
+                bottomTrailingRadius: 10,
+                topTrailingRadius: 6,
+                style: .continuous
+            )
+            .fill(paneFill)
         )
         .onAppear { appeared = true }
     }
@@ -293,9 +402,37 @@ private struct StackDetail: View {
     }
 }
 
-/// Resolve drops em URLs de arquivo. Versátil: arquivos locais entram
-/// direto; imagens arrastadas da web são salvas na pasta monitorada;
-/// links são baixados; texto vira .txt.
+/// Delegate de drop que força semântica de CÓPIA (nunca mover o
+/// original) e expõe enter/exit para o segurar-para-substituir.
+struct StackDropDelegate: DropDelegate {
+    let onEntered: () -> Void
+    let onExited: () -> Void
+    let onPerform: ([NSItemProvider]) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: StackDropHandler.acceptedTypes)
+    }
+
+    func dropEntered(info: DropInfo) {
+        onEntered()
+    }
+
+    func dropExited(info: DropInfo) {
+        onExited()
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .copy)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        onPerform(info.itemProviders(for: StackDropHandler.acceptedTypes))
+    }
+}
+
+/// Resolve drops em URLs de arquivo. As pilhas são independentes das
+/// pastas: arquivos locais entram por referência (nunca movidos);
+/// conteúdo da web/imagens/texto é salvo num cofre próprio do app.
 enum StackDropHandler {
     static let acceptedTypes: [UTType] = [.fileURL, .image, .url, .utf8PlainText]
 
@@ -339,7 +476,6 @@ enum StackDropHandler {
         provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
             guard var data else { return }
             var finalExt = ext
-            // TIFF (formato comum em drags) vira PNG, mais útil.
             if finalExt == "tiff" || finalExt == "tif",
                let rep = NSBitmapImageRep(data: data),
                let png = rep.representation(using: .png, properties: [:]) {
@@ -361,7 +497,6 @@ enum StackDropHandler {
                 Task { @MainActor in add(url) }
                 return
             }
-            // Link da web: baixa para a pasta monitorada.
             Task {
                 guard let (temp, response) = try? await URLSession.shared.download(from: url) else { return }
                 var name = response.suggestedFilename ?? url.lastPathComponent
@@ -405,12 +540,24 @@ enum StackDropHandler {
         return formatter.string(from: Date())
     }
 
+    /// Cofre próprio do app para conteúdo capturado de drops — as
+    /// pilhas não dependem da pasta monitorada.
+    private static func stashDirectory() -> URL {
+        let base = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("Downside/Pilhas", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     private static func uniqueDestination(name: String, ext: String) -> URL {
         uniqueDestination(filename: "\(name).\(ext)")
     }
 
     private static func uniqueDestination(filename: String) -> URL {
-        let folder = Prefs.folderURL
+        let folder = stashDirectory()
         var candidate = folder.appendingPathComponent(filename)
         let base = (filename as NSString).deletingPathExtension
         let ext = (filename as NSString).pathExtension

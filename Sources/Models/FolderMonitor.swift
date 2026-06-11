@@ -5,14 +5,15 @@ import Combine
 /// arquivos ordenada do mais recente para o mais antigo.
 @MainActor
 final class FolderMonitor: ObservableObject {
-    /// Limite de itens exibidos para manter o painel leve mesmo
-    /// em pastas gigantes.
+    /// Lote de itens exibidos; o usuário pode carregar mais lotes
+    /// rolando até o fim da lista.
     static let displayLimit = 300
 
     @Published private(set) var items: [FileItem] = []
     @Published private(set) var isTruncated = false
 
     private(set) var folderURL: URL
+    private var limit = FolderMonitor.displayLimit
     private var source: DispatchSourceFileSystemObject?
     private var pendingReload: DispatchWorkItem?
 
@@ -26,7 +27,15 @@ final class FolderMonitor: ObservableObject {
         guard folderURL != self.folderURL else { return }
         stopWatching()
         self.folderURL = folderURL
+        limit = Self.displayLimit
         startWatching()
+        reload()
+    }
+
+    /// Carrega mais um lote de itens (rolagem até o fim da lista).
+    func increaseLimit() {
+        guard isTruncated else { return }
+        limit += Self.displayLimit
         reload()
     }
 
@@ -53,8 +62,8 @@ final class FolderMonitor: ObservableObject {
         }
         loaded.sort { $0.date > $1.date }
 
-        isTruncated = loaded.count > Self.displayLimit
-        items = Array(loaded.prefix(Self.displayLimit))
+        isTruncated = loaded.count > limit
+        items = Array(loaded.prefix(limit))
     }
 
     private func startWatching() {

@@ -212,9 +212,16 @@ struct FolderPeekView: View {
         } else {
             ScrollView {
                 ZStack(alignment: .topLeading) {
-                    layout
-                        .padding(mode == .grid ? 10 * scale : 12 * scale)
-                        .background(emptyAreaCatcher)
+                    VStack(spacing: 0) {
+                        layout
+                        if monitor.isTruncated {
+                            LoadMoreFooter(scale: scale) {
+                                monitor.increaseLimit()
+                            }
+                        }
+                    }
+                    .padding(mode == .grid ? 10 * scale : 12 * scale)
+                    .background(emptyAreaCatcher)
 
                     if let rect = rubberBand {
                         RoundedRectangle(cornerRadius: 2)
@@ -451,6 +458,48 @@ struct FolderPeekView: View {
         }
         selection.subtract(urls)
         monitor.reload()
+    }
+}
+
+/// Rodapé que aparece ao rolar até o fim quando há mais itens: um
+/// círculo se preenche pela circunferência e o próximo lote carrega.
+private struct LoadMoreFooter: View {
+    let scale: CGFloat
+    var onComplete: () -> Void
+
+    @State private var progress: CGFloat = 0
+
+    var body: some View {
+        HStack(spacing: 8 * scale) {
+            ZStack {
+                Circle()
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 2)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(
+                        Color.accentColor,
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 16 * scale, height: 16 * scale)
+
+            Text("Carregando mais itens…")
+                .font(.system(size: 11 * scale))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12 * scale)
+        .onAppear {
+            progress = 0
+            withAnimation(.easeInOut(duration: 0.7)) {
+                progress = 1
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: 750_000_000)
+                onComplete()
+            }
+        }
     }
 }
 

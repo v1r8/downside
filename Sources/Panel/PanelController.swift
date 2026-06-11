@@ -55,12 +55,16 @@ final class PanelController: ObservableObject {
 
     /// True enquanto um arrasto iniciado no painel está em andamento;
     /// usado para exibir a zona de soltar da pilha.
-    @Published var isDraggingFromPanel = false
+    @Published var isDraggingFromPanel = false {
+        didSet { if !isDraggingFromPanel { pruneEmptyStacks() } }
+    }
 
     /// True quando o painel foi aberto no meio de um arrasto vindo de
     /// fora (canto ativo durante drag) — mantém as zonas de soltar
     /// visíveis até o botão do mouse ser solto.
-    @Published var externalDragActive = false
+    @Published var externalDragActive = false {
+        didSet { if !externalDragActive { pruneEmptyStacks() } }
+    }
 
     private(set) var isVisible = false
 
@@ -211,6 +215,18 @@ final class PanelController: ObservableObject {
 
     func clearStack(_ id: UUID) {
         stacks.removeAll { $0.id == id }
+    }
+
+    /// "Segurar para substituir": esvazia a pilha mantendo o chip vivo
+    /// durante o arrasto (o drop seguinte começa a pilha nova; chips
+    /// vazios são removidos quando o arrasto termina).
+    func replaceStack(_ id: UUID) {
+        guard let index = stacks.firstIndex(where: { $0.id == id }) else { return }
+        stacks[index].urls.removeAll()
+    }
+
+    private func pruneEmptyStacks() {
+        stacks.removeAll { $0.urls.isEmpty }
     }
 
     // MARK: - Internals

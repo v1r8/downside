@@ -15,6 +15,7 @@ struct SettingsView: View {
     @AppStorage(PrefKey.hoverPreviewEnabled) private var hoverPreviewEnabled = true
     @AppStorage(PrefKey.hoverPreviewDelay) private var hoverPreviewDelay = 0.8
     @AppStorage(PrefKey.hoverPreviewSize) private var hoverPreviewSize = 1.0
+    @AppStorage(PrefKey.stackReplaceDelay) private var stackReplaceDelay = 3.0
 
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
@@ -82,6 +83,20 @@ struct SettingsView: View {
                     Text("Interface em \(Int(uiScale * 100))% — fontes, ícones, previews e painel")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Pilhas temporárias") {
+                VStack(alignment: .leading) {
+                    Slider(value: $stackReplaceDelay, in: 1...6) {
+                        Text("Segurar para substituir")
+                    }
+                    Text(String(
+                        format: "Segurar um arrasto sobre uma pilha por %.1f s substitui o conteúdo dela",
+                        stackReplaceDelay
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             }
 
