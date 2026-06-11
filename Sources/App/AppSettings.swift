@@ -241,6 +241,26 @@ enum Prefs {
         return NSSize(width: w > 200 ? w : 560, height: h > 160 ? h : 420)
     }
 
+    /// Posição do painel na grade 3×3 da tela (snap proporcional),
+    /// escolhida pelo usuário ao arrastar pela alça.
+    static var panelAnchor: (col: Int, row: Int)? {
+        guard UserDefaults.standard.object(forKey: "panelAnchor.col") != nil else { return nil }
+        return (
+            UserDefaults.standard.integer(forKey: "panelAnchor.col"),
+            UserDefaults.standard.integer(forKey: "panelAnchor.row")
+        )
+    }
+
+    static func setPanelAnchor(col: Int, row: Int) {
+        UserDefaults.standard.set(col, forKey: "panelAnchor.col")
+        UserDefaults.standard.set(row, forKey: "panelAnchor.row")
+    }
+
+    static func clearPanelAnchor() {
+        UserDefaults.standard.removeObject(forKey: "panelAnchor.col")
+        UserDefaults.standard.removeObject(forKey: "panelAnchor.row")
+    }
+
     /// Tamanho que o usuário deu ao painel arrastando pelas bordas,
     /// memorizado por modo de exibição.
     static func savedPanelSize(for mode: ViewMode) -> NSSize? {

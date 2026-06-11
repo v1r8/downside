@@ -152,6 +152,14 @@ struct FolderPeekView: View {
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11 * scale))
+                .foregroundStyle(.secondary)
+                .frame(width: 18 * scale, height: 18 * scale)
+                .contentShape(Rectangle())
+                .overlay(WindowDragHandle { panel.panelDragEnded() })
+                .help("Arraste para reposicionar — o painel encaixa na grade da tela e memoriza")
+
             Group {
                 Button {
                     panel.isPinned.toggle()

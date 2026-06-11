@@ -96,7 +96,15 @@ final class PanelController: ObservableObject {
             showDimmer(on: screen)
         }
 
-        let frame = targetFrame(size: size(for: mode), corner: corner, screen: screen)
+        // Posição escolhida pelo usuário (grade 3×3) tem prioridade
+        // sobre a ancoragem pelo canto que disparou.
+        let panelSize = size(for: mode)
+        let frame: NSRect
+        if let anchor = Prefs.panelAnchor {
+            frame = anchoredFrame(col: anchor.col, row: anchor.row, size: panelSize, screen: screen)
+        } else {
+            frame = targetFrame(size: panelSize, corner: corner, screen: screen)
+        }
 
         // Parte ligeiramente "de dentro" do canto, com fade — movimento
         // curto e suave, como os paineis do sistema.
@@ -319,6 +327,64 @@ final class PanelController: ObservableObject {
                 }
             }
         })
+    }
+
+    /// Grade 3×3 proporcional à tela: esquerda/centro/direita ×
+    /// baixo/meio/cima, com margem fixa.
+    private func anchoredFrame(col: Int, row: Int, size: NSSize, screen: NSScreen) -> NSRect {
+        let area = screen.visibleFrame
+        let margin: CGFloat = 12
+        let width = min(size.width, area.width - 2 * margin)
+        let height = min(size.height, area.height - 2 * margin)
+        let xs = [
+            area.minX + margin,
+            area.midX - width / 2,
+            area.maxX - width - margin,
+        ]
+        let ys = [
+            area.minY + margin,
+            area.midY - height / 2,
+            area.maxY - height - margin,
+        ]
+        return NSRect(
+            x: xs[max(0, min(2, col))],
+            y: ys[max(0, min(2, row))],
+            width: width,
+            height: height
+        )
+    }
+
+    /// Fim do arrasto pela alça: encaixa na célula mais próxima da
+    /// grade e memoriza a escolha.
+    func panelDragEnded() {
+        guard let panel,
+              let screen = panel.screen ?? lastScreen ?? NSScreen.main
+        else { return }
+        lastScreen = screen
+
+        let size = panel.frame.size
+        var best = (col: 0, row: 0)
+        var bestDistance = CGFloat.greatestFiniteMagnitude
+        for col in 0..<3 {
+            for row in 0..<3 {
+                let candidate = anchoredFrame(col: col, row: row, size: size, screen: screen)
+                let dx = candidate.minX - panel.frame.minX
+                let dy = candidate.minY - panel.frame.minY
+                let distance = (dx * dx + dy * dy).squareRoot()
+                if distance < bestDistance {
+                    bestDistance = distance
+                    best = (col, row)
+                }
+            }
+        }
+
+        Prefs.setPanelAnchor(col: best.col, row: best.row)
+        let target = anchoredFrame(col: best.col, row: best.row, size: size, screen: screen)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(target, display: true)
+        }
     }
 
     private func targetFrame(size: NSSize, corner: HotCorner, screen: NSScreen) -> NSRect {

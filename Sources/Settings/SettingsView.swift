@@ -153,6 +153,12 @@ struct SettingsView: View {
                     .onChange(of: launchAtLogin) { _, enabled in
                         setLaunchAtLogin(enabled)
                     }
+
+                LabeledContent("Posição do painel") {
+                    Button("Restaurar padrão (canto que abriu)") {
+                        Prefs.clearPanelAnchor()
+                    }
+                }
             }
 
             Section("Atualizações") {

@@ -58,18 +58,22 @@ final class HotCornerMonitor {
                 return (dx * dx + dy * dy).squareRoot() <= radius
             }
             if active == nil {
-                if edges.contains(.left), mouse.x - frame.minX <= radius {
+                // Laterais ignoram a faixa próxima dos cantos, para não
+                // conflitar com os gatilhos de canto.
+                let insideBand = mouse.y > frame.minY + 120 && mouse.y < frame.maxY - 120
+                if edges.contains(.left), insideBand, mouse.x - frame.minX <= radius {
                     active = mouse.y < frame.midY ? .bottomLeft : .topLeft
-                } else if edges.contains(.right), frame.maxX - mouse.x <= radius {
+                } else if edges.contains(.right), insideBand, frame.maxX - mouse.x <= radius {
                     active = mouse.y < frame.midY ? .bottomRight : .topRight
                 }
             }
         } else {
             active = corners.first { $0.zone(in: frame, size: 6).contains(mouse) }
             if active == nil {
-                if edges.contains(.left), mouse.x <= frame.minX + 2 {
+                let insideBand = mouse.y > frame.minY + 120 && mouse.y < frame.maxY - 120
+                if edges.contains(.left), insideBand, mouse.x <= frame.minX + 2 {
                     active = mouse.y < frame.midY ? .bottomLeft : .topLeft
-                } else if edges.contains(.right), mouse.x >= frame.maxX - 2 {
+                } else if edges.contains(.right), insideBand, mouse.x >= frame.maxX - 2 {
                     active = mouse.y < frame.midY ? .bottomRight : .topRight
                 }
             }

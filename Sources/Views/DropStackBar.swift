@@ -16,23 +16,27 @@ struct DropStackBar: View {
     let scale: CGFloat
 
     @State private var expanded: UUID?
-    /// Mantém o conteúdo visível durante a animação de fechamento.
+    /// Mantém a forma de fundo durante a animação de fechamento.
     @State private var lastDetailID: UUID?
     @State private var chipFrames: [UUID: CGRect] = [:]
+    /// Namespace do "deck de cartas": os ícones viajam entre o leque do
+    /// chip e as linhas da lista expandida.
+    @Namespace private var deck
 
     private var detailStack: FileStack? {
-        let id = expanded ?? lastDetailID
-        return panel.stacks.first { $0.id == id }
+        guard let expanded else { return nil }
+        return panel.stacks.first { $0.id == expanded }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8 * scale) {
+            HStack(alignment: .top, spacing: 8 * scale) {
                 ForEach(panel.stacks) { stack in
                     StackChip(
                         stack: stack,
                         scale: scale,
                         isActive: expanded == stack.id,
+                        deck: deck,
                         onToggleExpand: { toggle(stack.id) }
                     )
                     .background(
@@ -53,20 +57,15 @@ struct DropStackBar: View {
                 }
             }
 
-            // Painel de conteúdo persistente: a altura anima (revelação,
-            // sem esticar o conteúdo), então nada pisca no fim.
-            Group {
-                if let stack = detailStack {
-                    StackDetailContent(stack: stack, scale: scale) {
-                        toggle(stack.id)
-                    }
-                    .id(stack.id)
+            // Conteúdo expandido: entra/sai por fade (a altura anima no
+            // layout) enquanto os ícones fazem o voo de deck de cartas.
+            if let stack = detailStack {
+                StackDetailContent(stack: stack, scale: scale, deck: deck) {
+                    toggle(stack.id)
                 }
+                .id(stack.id)
+                .transition(.opacity)
             }
-            .frame(maxHeight: expanded == nil ? 0 : nil, alignment: .top)
-            .clipped()
-            .opacity(expanded == nil ? 0 : 1)
-            .allowsHitTesting(expanded != nil)
         }
         .background(unifiedTabBackground)
         .coordinateSpace(name: barSpace)
@@ -76,7 +75,7 @@ struct DropStackBar: View {
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.stacks)
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.isDraggingFromPanel)
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.externalDragActive)
-        .animation(.spring(response: 0.34, dampingFraction: 0.84), value: expanded)
+        .animation(.spring(response: 0.36, dampingFraction: 0.82), value: expanded)
         .onChange(of: panel.stacks) { _, stacks in
             if let id = expanded, !stacks.contains(where: { $0.id == id }) {
                 expanded = nil
@@ -211,6 +210,7 @@ private struct StackChip: View {
     let stack: FileStack
     let scale: CGFloat
     let isActive: Bool
+    let deck: Namespace.ID
     let onToggleExpand: () -> Void
 
     @State private var targeted = false
@@ -219,19 +219,25 @@ private struct StackChip: View {
 
     var body: some View {
         HStack(spacing: 6 * scale) {
-            if stack.urls.isEmpty {
+            if stack.urls.isEmpty || isActive {
+                // Deck "vazio" enquanto as cartas estão na lista.
                 Image(systemName: "tray")
                     .font(.system(size: 13 * scale))
                     .foregroundStyle(.secondary)
+                    .opacity(isActive ? 0.45 : 1)
                     .frame(width: 36 * scale, alignment: .leading)
             } else {
                 ZStack(alignment: .leading) {
                     ForEach(Array(stack.urls.suffix(3).enumerated()), id: \.element) { index, url in
-                        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                            .resizable()
+                        ThumbnailView(url: url)
                             .frame(width: 22 * scale, height: 22 * scale)
-                            .offset(x: CGFloat(index) * 6 * scale)
+                            .padding(.leading, CGFloat(index) * 6 * scale)
                             .rotationEffect(.degrees(Double(index) * 3 - 3))
+                            .matchedGeometryEffect(
+                                id: "\(stack.id)-\(url.path)",
+                                in: deck,
+                                isSource: false
+                            )
                     }
                 }
                 .frame(width: 36 * scale, alignment: .leading)
@@ -249,7 +255,10 @@ private struct StackChip: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 8 * scale)
-        .padding(.vertical, 5 * scale)
+        .padding(.top, 5 * scale)
+        // A aba ativa desce até o painel; as outras ficam com um respiro
+        // acima dele (nada de sobreposição visual).
+        .padding(.bottom, (isActive ? 9 : 5) * scale)
         .frame(maxWidth: .infinity)
         .background(chipBackground)
         .scaleEffect(targeted ? 1.05 : 1)
@@ -403,29 +412,25 @@ private struct NewStackTarget: View {
     }
 }
 
-/// Conteúdo do painel da aba: lista com previews em cascata sutil.
-/// Sem fundo próprio — a forma unificada da barra cuida do visual.
+/// Conteúdo do painel da aba: as "cartas" pousam aqui vindas do leque
+/// do chip (matched geometry). Também é alvo de drop, com o mesmo
+/// highlight azul dos chips. Sem fundo próprio — a forma unificada da
+/// barra cuida do visual.
 private struct StackDetailContent: View {
     @EnvironmentObject private var panel: PanelController
     let stack: FileStack
     let scale: CGFloat
+    let deck: Namespace.ID
     var onClose: () -> Void
 
-    @State private var appeared = false
+    @State private var targeted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(Array(stack.urls.enumerated()), id: \.element) { index, url in
+                    ForEach(stack.urls, id: \.self) { url in
                         row(url)
-                            .offset(y: appeared ? 0 : -8)
-                            .opacity(appeared ? 1 : 0)
-                            .animation(
-                                .spring(response: 0.3, dampingFraction: 0.78)
-                                    .delay(Double(min(index, 10)) * 0.025),
-                                value: appeared
-                            )
                     }
                 }
                 .padding(6 * scale)
@@ -450,7 +455,29 @@ private struct StackDetailContent: View {
             .padding(.vertical, 5 * scale)
         }
         .frame(maxWidth: .infinity)
-        .onAppear { appeared = true }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.accentColor.opacity(targeted ? 0.08 : 0))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.accentColor, lineWidth: 1)
+                .opacity(targeted ? 1 : 0)
+        )
+        .animation(.easeOut(duration: 0.12), value: targeted)
+        .onDrop(
+            of: StackDropHandler.acceptedTypes,
+            delegate: StackDropDelegate(
+                onEntered: { targeted = true },
+                onExited: { targeted = false },
+                onPerform: { providers in
+                    targeted = false
+                    return StackDropHandler.accept(providers) { url in
+                        panel.addToStack(stack.id, url: url)
+                    }
+                }
+            )
+        )
     }
 
     private func row(_ url: URL) -> some View {
@@ -458,6 +485,11 @@ private struct StackDetailContent: View {
             HStack(spacing: 8 * scale) {
                 ThumbnailView(url: url)
                     .frame(width: 26 * scale, height: 26 * scale)
+                    .matchedGeometryEffect(
+                        id: "\(stack.id)-\(url.path)",
+                        in: deck,
+                        isSource: true
+                    )
                 Text(url.lastPathComponent)
                     .font(.system(size: 11.5 * scale))
                     .lineLimit(1)
