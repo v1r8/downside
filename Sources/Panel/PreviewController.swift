@@ -125,6 +125,13 @@ final class PreviewController {
         panel.alphaValue = 0
         panel.orderFront(nil)
         isShowing = true
+        fadeIn(panel)
+    }
+
+    /// Em contexto async, runAnimationGroup resolveria para a variante
+    /// assíncrona (que espera a animação); este helper síncrono garante
+    /// a variante imediata.
+    private func fadeIn(_ panel: NSPanel) {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.16
             panel.animator().alphaValue = 1
