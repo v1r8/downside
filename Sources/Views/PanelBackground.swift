@@ -40,13 +40,3 @@ struct VisualEffectView: NSViewRepresentable {
         view.blendingMode = blendingMode
     }
 }
-
-/// Abre a janela de Configurações a partir de contextos fora de cena
-/// SwiftUI (ex.: botão dentro do painel).
-enum SettingsOpener {
-    @MainActor
-    static func open() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-    }
-}

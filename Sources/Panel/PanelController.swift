@@ -1,6 +1,16 @@
 import AppKit
 import SwiftUI
 
+struct FileStack: Identifiable, Equatable {
+    let id: UUID
+    var urls: [URL]
+
+    init(id: UUID = UUID(), urls: [URL] = []) {
+        self.id = id
+        self.urls = urls
+    }
+}
+
 /// Janela que escurece levemente a tela atrás do painel no modo
 /// minimalista. Clicar nela fecha o painel.
 final class DimmerWindow: NSWindow {
@@ -37,9 +47,11 @@ final class PanelController: ObservableObject {
     /// Preview flutuante de hover (compartilhado com a view do painel).
     let preview = PreviewController()
 
-    /// Pilha temporária de arquivos (drop stack) — sobrevive a abrir e
-    /// fechar o painel, até ser limpa.
-    @Published var stackURLs: [URL] = []
+    /// Pilhas temporárias de arquivos (até 3, lado a lado) — sobrevivem
+    /// a abrir e fechar o painel, até serem limpas.
+    @Published var stacks: [FileStack] = []
+
+    static let maxStacks = 3
 
     /// True enquanto um arrasto iniciado no painel está em andamento;
     /// usado para exibir a zona de soltar da pilha.
@@ -51,6 +63,7 @@ final class PanelController: ObservableObject {
     private var panel: PeekPanel?
     private var dimmer: DimmerWindow?
     private var watchTimer: Timer?
+    private var outsideClickMonitor: Any?
     private var lastMouseInside = Date()
     private var lastCorner: HotCorner = .bottomRight
     private var lastScreen: NSScreen?
@@ -101,6 +114,15 @@ final class PanelController: ObservableObject {
         }
 
         startAutoHideWatcher()
+
+        // Clique em qualquer outro app/área fora do painel fecha.
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { _ in
+            Task { @MainActor in
+                AppState.shared.panelController.handleOutsideClick()
+            }
+        }
     }
 
     func hide() {
@@ -108,6 +130,10 @@ final class PanelController: ObservableObject {
         isVisible = false
         watchTimer?.invalidate()
         watchTimer = nil
+        if let monitor = outsideClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            outsideClickMonitor = nil
+        }
         preview.dismiss()
         hideDimmer()
 
@@ -145,19 +171,34 @@ final class PanelController: ObservableObject {
         }
     }
 
-    // MARK: - Pilha temporária
+    // MARK: - Pilhas temporárias
 
-    func addToStack(_ url: URL) {
-        guard !stackURLs.contains(url) else { return }
-        stackURLs.append(url)
+    var hasStacks: Bool { !stacks.isEmpty }
+
+    /// Adiciona à pilha indicada; com `id` nulo cria uma pilha nova
+    /// (ou usa a última, se já houver 3).
+    func addToStack(_ id: UUID?, url: URL) {
+        if let id, let index = stacks.firstIndex(where: { $0.id == id }) {
+            if !stacks[index].urls.contains(url) {
+                stacks[index].urls.append(url)
+            }
+        } else if stacks.count < Self.maxStacks {
+            stacks.append(FileStack(urls: [url]))
+        } else if let last = stacks.indices.last, !stacks[last].urls.contains(url) {
+            stacks[last].urls.append(url)
+        }
     }
 
-    func removeFromStack(_ url: URL) {
-        stackURLs.removeAll { $0 == url }
+    func removeFromStack(_ id: UUID, url: URL) {
+        guard let index = stacks.firstIndex(where: { $0.id == id }) else { return }
+        stacks[index].urls.removeAll { $0 == url }
+        if stacks[index].urls.isEmpty {
+            stacks.remove(at: index)
+        }
     }
 
-    func clearStack() {
-        stackURLs.removeAll()
+    func clearStack(_ id: UUID) {
+        stacks.removeAll { $0.id == id }
     }
 
     // MARK: - Internals
@@ -286,7 +327,7 @@ final class PanelController: ObservableObject {
 
     private func autoHideTick() {
         guard isVisible, let panel else { return }
-        if isPinned {
+        if isPinned || !Prefs.autoHideEnabled {
             lastMouseInside = Date()
             return
         }
@@ -294,6 +335,7 @@ final class PanelController: ObservableObject {
         let mouse = NSEvent.mouseLocation
         let margin = Prefs.hideMargin
         let inside = panel.frame.insetBy(dx: -margin, dy: -margin).contains(mouse)
+            || preview.frameContains(mouse)
         let dragging = NSEvent.pressedMouseButtons != 0
 
         if inside || dragging {
@@ -301,5 +343,13 @@ final class PanelController: ObservableObject {
         } else if Date().timeIntervalSince(lastMouseInside) > 0.6 {
             hide()
         }
+    }
+
+    /// Clique global fora do painel (e fora do preview) fecha o painel.
+    func handleOutsideClick() {
+        guard isVisible, !isPinned, let panel else { return }
+        let mouse = NSEvent.mouseLocation
+        guard !panel.frame.contains(mouse), !preview.frameContains(mouse) else { return }
+        hide()
     }
 }

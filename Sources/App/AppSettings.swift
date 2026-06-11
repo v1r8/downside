@@ -73,10 +73,12 @@ enum PrefKey {
     static let dwell = "hotCornerDwell"
     static let hotCornerEnabled = "hotCornerEnabled"
     static let hideMargin = "hideMargin"
+    static let autoHideEnabled = "autoHideOnLeave"
     static let viewMode = "viewMode"
     static let uiScale = "uiScale"
     static let hoverPreviewEnabled = "hoverPreviewEnabled"
     static let hoverPreviewDelay = "hoverPreviewDelay"
+    static let hoverPreviewSize = "hoverPreviewSize"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -121,6 +123,12 @@ enum Prefs {
         return value > 0 ? CGFloat(value) : 220
     }
 
+    /// Se desligado, o painel só fecha por clique fora, Esc, canto
+    /// ativo de novo ou ação explícita.
+    static var autoHideEnabled: Bool {
+        UserDefaults.standard.object(forKey: PrefKey.autoHideEnabled) as? Bool ?? true
+    }
+
     static var viewMode: ViewMode {
         ViewMode(rawValue: UserDefaults.standard.string(forKey: PrefKey.viewMode) ?? "") ?? .grid
     }
@@ -140,6 +148,14 @@ enum Prefs {
     static var hoverPreviewDelay: TimeInterval {
         let value = UserDefaults.standard.double(forKey: PrefKey.hoverPreviewDelay)
         return value > 0 ? value : 0.8
+    }
+
+    /// Fator de tamanho do cartão de preview (multiplicado pela escala
+    /// geral da interface).
+    static var hoverPreviewSize: CGFloat {
+        let value = UserDefaults.standard.double(forKey: PrefKey.hoverPreviewSize)
+        guard value >= 0.7, value <= 1.8 else { return 1.0 }
+        return CGFloat(value)
     }
 
     static var panelSize: NSSize {

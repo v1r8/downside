@@ -14,6 +14,7 @@ import AppKit
 struct FolderPeekView: View {
     @EnvironmentObject private var monitor: FolderMonitor
     @EnvironmentObject private var panel: PanelController
+    @Environment(\.openSettings) private var openSettings
 
     @AppStorage(PrefKey.viewMode) private var viewModeRaw = ViewMode.grid.rawValue
     @AppStorage(PrefKey.uiScale) private var uiScaleRaw = 1.0
@@ -72,7 +73,7 @@ struct FolderPeekView: View {
                     .minimalShadow(mode == .minimal)
             }
 
-            if panel.isDraggingFromPanel || !panel.stackURLs.isEmpty {
+            if panel.isDraggingFromPanel || panel.hasStacks {
                 DropStackBar(scale: scale)
             }
 
@@ -81,21 +82,6 @@ struct FolderPeekView: View {
             }
             content
         }
-        .overlay(alignment: .topTrailing) {
-            if !selection.isEmpty {
-                Text("\(selection.count)")
-                    .font(.system(size: 11 * scale, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8 * scale)
-                    .padding(.vertical, 3 * scale)
-                    .background(Capsule().fill(Color.accentColor))
-                    .padding(.top, 42 * scale)
-                    .padding(.trailing, 10 * scale)
-                    .allowsHitTesting(false)
-                    .transition(.scale.combined(with: .opacity))
-            }
-        }
-        .animation(.spring(duration: 0.25), value: selection.count)
         .background {
             if mode != .minimal {
                 PanelBackground()
@@ -145,6 +131,27 @@ struct FolderPeekView: View {
 
             searchField
 
+            // Ao selecionar, a busca encolhe e o contador surge ao lado.
+            if !selection.isEmpty {
+                Button {
+                    selection.removeAll()
+                    anchorIndex = nil
+                } label: {
+                    HStack(spacing: 3 * scale) {
+                        Text("\(selection.count)")
+                            .font(.system(size: 11 * scale, weight: .bold))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 7 * scale, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8 * scale)
+                    .padding(.vertical, 4 * scale)
+                    .background(Capsule().fill(Color.accentColor))
+                }
+                .help("\(selection.count) selecionados — clique para limpar")
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+
             Group {
                 Button {
                     panel.isPinned.toggle()
@@ -154,7 +161,8 @@ struct FolderPeekView: View {
                 .help(panel.isPinned ? "Liberar painel" : "Manter painel aberto")
 
                 Button {
-                    SettingsOpener.open()
+                    NSApp.activate(ignoringOtherApps: true)
+                    openSettings()
                 } label: {
                     Image(systemName: "gearshape")
                 }
@@ -165,6 +173,7 @@ struct FolderPeekView: View {
         .buttonStyle(.borderless)
         .padding(.horizontal, 14 * scale)
         .padding(.vertical, 10 * scale)
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: selection.isEmpty)
     }
 
     private var searchField: some View {
@@ -245,8 +254,24 @@ struct FolderPeekView: View {
         case .list:
             LazyVStack(spacing: 2) {
                 ForEach(displayedItems) { item in
-                    interactive(item) {
-                        FileRow(item: item, isSelected: selection.contains(item.url), scale: scale)
+                    HStack(spacing: 6 * scale) {
+                        interactive(item) {
+                            FileRow(item: item, isSelected: selection.contains(item.url), scale: scale)
+                        }
+                        if item.url.pathExtension.lowercased() == "ics" {
+                            Button {
+                                NSWorkspace.shared.open(item.url)
+                            } label: {
+                                Label("Agenda", systemImage: "calendar.badge.plus")
+                                    .font(.system(size: 10 * scale, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8 * scale)
+                                    .padding(.vertical, 3 * scale)
+                                    .background(Capsule().fill(Color.accentColor))
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Adicionar evento à Agenda")
+                        }
                     }
                 }
             }

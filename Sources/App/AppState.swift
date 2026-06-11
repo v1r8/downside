@@ -21,9 +21,15 @@ final class AppState {
     }
 
     func start() {
+        // Canto ativo alterna: abre se fechado, fecha se aberto.
         hotCorner.onTrigger = { screen, corner in
             Task { @MainActor in
-                AppState.shared.panelController.show(on: screen, corner: corner)
+                let controller = AppState.shared.panelController
+                if controller.isVisible {
+                    controller.hide()
+                } else {
+                    controller.show(on: screen, corner: corner)
+                }
             }
         }
         hotCorner.start()

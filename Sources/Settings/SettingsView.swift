@@ -9,10 +9,12 @@ struct SettingsView: View {
     @AppStorage(PrefKey.dwell) private var dwell = 0.12
     @AppStorage(PrefKey.hotCornerEnabled) private var hotCornerEnabled = true
     @AppStorage(PrefKey.hideMargin) private var hideMargin = 220.0
+    @AppStorage(PrefKey.autoHideEnabled) private var autoHideEnabled = true
     @AppStorage(PrefKey.viewMode) private var viewModeRaw = ViewMode.grid.rawValue
     @AppStorage(PrefKey.uiScale) private var uiScale = 1.0
     @AppStorage(PrefKey.hoverPreviewEnabled) private var hoverPreviewEnabled = true
     @AppStorage(PrefKey.hoverPreviewDelay) private var hoverPreviewDelay = 0.8
+    @AppStorage(PrefKey.hoverPreviewSize) private var hoverPreviewSize = 1.0
 
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
@@ -59,11 +61,16 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Toggle("Fechar ao afastar o mouse", isOn: $autoHideEnabled)
+
                 VStack(alignment: .leading) {
                     Slider(value: $hideMargin, in: 50...600) {
                         Text("Área antes de fechar")
                     }
-                    Text("O painel fecha quando o mouse se afasta ~\(Int(hideMargin)) px dele")
+                    .disabled(!autoHideEnabled)
+                    Text(autoHideEnabled
+                        ? "O painel fecha quando o mouse se afasta ~\(Int(hideMargin)) px dele"
+                        : "O painel só fecha por clique fora, Esc ou canto ativo")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -87,6 +94,16 @@ struct SettingsView: View {
                     }
                     .disabled(!hoverPreviewEnabled)
                     Text(String(format: "%.1f s parado sobre o item antes do preview abrir", hoverPreviewDelay))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading) {
+                    Slider(value: $hoverPreviewSize, in: 0.7...1.8) {
+                        Text("Tamanho do preview")
+                    }
+                    .disabled(!hoverPreviewEnabled)
+                    Text("Cartão de preview em \(Int(hoverPreviewSize * 100))%")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
