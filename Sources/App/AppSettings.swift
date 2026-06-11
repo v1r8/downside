@@ -32,11 +32,48 @@ enum HotCorner: String, CaseIterable, Identifiable {
     }
 }
 
+enum ViewMode: String, CaseIterable, Identifiable {
+    case grid
+    case list
+    case minimal
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .grid: return "Grade"
+        case .list: return "Lista"
+        case .minimal: return "Minimalista"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .grid: return "square.grid.2x2"
+        case .list: return "list.bullet"
+        case .minimal: return "text.alignleft"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .grid: return "Miniaturas grandes em grade, como o Finder"
+        case .list: return "Linhas compactas com preview, tamanho e data"
+        case .minimal: return "Só os nomes, sem fundo, com leve escurecimento da tela"
+        }
+    }
+}
+
 enum PrefKey {
     static let folderPath = "folderPath"
+    /// Antiga preferência de canto único (mantida para migração).
     static let corner = "hotCorner"
+    /// Cantos ativos, separados por vírgula.
+    static let corners = "hotCorners"
     static let dwell = "hotCornerDwell"
     static let hotCornerEnabled = "hotCornerEnabled"
+    static let hideMargin = "hideMargin"
+    static let viewMode = "viewMode"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -52,8 +89,17 @@ enum Prefs {
             ?? FileManager.default.homeDirectoryForCurrentUser
     }
 
-    static var corner: HotCorner {
-        HotCorner(rawValue: UserDefaults.standard.string(forKey: PrefKey.corner) ?? "") ?? .bottomRight
+    static var corners: Set<HotCorner> {
+        if let raw = UserDefaults.standard.string(forKey: PrefKey.corners) {
+            // String vazia = usuário desligou todos os cantos de propósito.
+            return Set(raw.split(separator: ",").compactMap { HotCorner(rawValue: String($0)) })
+        }
+        // Migra a preferência antiga de canto único.
+        if let old = UserDefaults.standard.string(forKey: PrefKey.corner),
+           let corner = HotCorner(rawValue: old) {
+            return [corner]
+        }
+        return [.bottomRight]
     }
 
     static var dwell: TimeInterval {
@@ -63,6 +109,17 @@ enum Prefs {
 
     static var hotCornerEnabled: Bool {
         UserDefaults.standard.object(forKey: PrefKey.hotCornerEnabled) as? Bool ?? true
+    }
+
+    /// Distância (px) que o mouse pode se afastar do painel antes de
+    /// ele fechar sozinho.
+    static var hideMargin: CGFloat {
+        let value = UserDefaults.standard.double(forKey: PrefKey.hideMargin)
+        return value > 0 ? CGFloat(value) : 220
+    }
+
+    static var viewMode: ViewMode {
+        ViewMode(rawValue: UserDefaults.standard.string(forKey: PrefKey.viewMode) ?? "") ?? .grid
     }
 
     static var panelSize: NSSize {

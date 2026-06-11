@@ -4,10 +4,11 @@ import AppKit
 /// Usa um timer leve de polling (~16x/s) em vez de event taps,
 /// o que dispensa permissões de acessibilidade e custa quase nada de CPU.
 final class HotCornerMonitor {
-    var onTrigger: ((NSScreen) -> Void)?
+    var onTrigger: ((NSScreen, HotCorner) -> Void)?
 
     private var timer: Timer?
     private var dwellStart: Date?
+    private var dwellCorner: HotCorner?
     /// Evita redisparo contínuo: só rearma depois que o mouse sai do canto.
     private var armed = true
 
@@ -38,20 +39,23 @@ final class HotCornerMonitor {
             return
         }
 
-        let zone = Prefs.corner.zone(in: screen.frame, size: 6)
-        if zone.contains(mouse) {
+        let corners = Prefs.corners
+        if let corner = corners.first(where: { $0.zone(in: screen.frame, size: 6).contains(mouse) }) {
             guard armed else { return }
-            if let start = dwellStart {
+            if dwellCorner == corner, let start = dwellStart {
                 if Date().timeIntervalSince(start) >= Prefs.dwell {
                     dwellStart = nil
+                    dwellCorner = nil
                     armed = false
-                    onTrigger?(screen)
+                    onTrigger?(screen, corner)
                 }
             } else {
+                dwellCorner = corner
                 dwellStart = Date()
             }
         } else {
             dwellStart = nil
+            dwellCorner = nil
             armed = true
         }
     }

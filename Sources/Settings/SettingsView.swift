@@ -5,9 +5,11 @@ import Sparkle
 
 struct SettingsView: View {
     @AppStorage(PrefKey.folderPath) private var folderPath = ""
-    @AppStorage(PrefKey.corner) private var corner = HotCorner.bottomRight.rawValue
+    @AppStorage(PrefKey.corners) private var cornersRaw = HotCorner.bottomRight.rawValue
     @AppStorage(PrefKey.dwell) private var dwell = 0.12
     @AppStorage(PrefKey.hotCornerEnabled) private var hotCornerEnabled = true
+    @AppStorage(PrefKey.hideMargin) private var hideMargin = 220.0
+    @AppStorage(PrefKey.viewMode) private var viewModeRaw = ViewMode.grid.rawValue
 
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
@@ -25,15 +27,13 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Canto ativo") {
-                Toggle("Abrir painel pelo canto da tela", isOn: $hotCornerEnabled)
+            Section("Cantos ativos") {
+                Toggle("Abrir painel pelos cantos da tela", isOn: $hotCornerEnabled)
 
-                Picker("Canto", selection: $corner) {
-                    ForEach(HotCorner.allCases) { corner in
-                        Text(corner.label).tag(corner.rawValue)
-                    }
+                ForEach(HotCorner.allCases) { corner in
+                    Toggle(corner.label, isOn: cornerBinding(corner))
+                        .disabled(!hotCornerEnabled)
                 }
-                .disabled(!hotCornerEnabled)
 
                 VStack(alignment: .leading) {
                     Slider(value: $dwell, in: 0.05...0.5) {
@@ -41,6 +41,26 @@ struct SettingsView: View {
                     }
                     .disabled(!hotCornerEnabled)
                     Text("\(Int(dwell * 1000)) ms no canto antes de abrir")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Exibição") {
+                Picker("Modo de exibição", selection: $viewModeRaw) {
+                    ForEach(ViewMode.allCases) { mode in
+                        Text(mode.label).tag(mode.rawValue)
+                    }
+                }
+                Text(currentModeDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading) {
+                    Slider(value: $hideMargin, in: 50...600) {
+                        Text("Área antes de fechar")
+                    }
+                    Text("O painel fecha quando o mouse se afasta ~\(Int(hideMargin)) px dele")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -67,6 +87,27 @@ struct SettingsView: View {
         .onAppear {
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private var currentModeDescription: String {
+        (ViewMode(rawValue: viewModeRaw) ?? .grid).description
+    }
+
+    private func cornerBinding(_ corner: HotCorner) -> Binding<Bool> {
+        Binding(
+            get: {
+                cornersRaw.split(separator: ",").contains(Substring(corner.rawValue))
+            },
+            set: { enabled in
+                var corners = Set(cornersRaw.split(separator: ",").map(String.init))
+                if enabled {
+                    corners.insert(corner.rawValue)
+                } else {
+                    corners.remove(corner.rawValue)
+                }
+                cornersRaw = corners.sorted().joined(separator: ",")
+            }
+        )
     }
 
     private var displayPath: String {

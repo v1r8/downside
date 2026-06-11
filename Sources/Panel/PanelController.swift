@@ -1,6 +1,33 @@
 import AppKit
 import SwiftUI
 
+/// Janela que escurece levemente a tela atrás do painel no modo
+/// minimalista. Clicar nela fecha o painel.
+final class DimmerWindow: NSWindow {
+    var onClick: (() -> Void)?
+
+    override var canBecomeKey: Bool { false }
+
+    init() {
+        super.init(
+            contentRect: .zero,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        isOpaque = false
+        backgroundColor = NSColor.black.withAlphaComponent(0.28)
+        level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue - 1)
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        hasShadow = false
+        animationBehavior = .none
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onClick?()
+    }
+}
+
 /// Controla exibição, posicionamento, animação e auto-ocultação do painel.
 @MainActor
 final class PanelController: ObservableObject {
@@ -11,21 +38,32 @@ final class PanelController: ObservableObject {
 
     private let folderMonitor: FolderMonitor
     private var panel: PeekPanel?
+    private var dimmer: DimmerWindow?
     private var watchTimer: Timer?
     private var lastMouseInside = Date()
+    private var lastCorner: HotCorner = .bottomRight
+    private var lastScreen: NSScreen?
 
     init(folderMonitor: FolderMonitor) {
         self.folderMonitor = folderMonitor
     }
 
-    func show(on screen: NSScreen) {
+    func show(on screen: NSScreen, corner: HotCorner? = nil) {
         guard !isVisible else { return }
+
+        let corner = corner ?? preferredCorner()
+        lastCorner = corner
+        lastScreen = screen
 
         let panel = ensurePanel()
         folderMonitor.reload()
 
-        let corner = Prefs.corner
-        let frame = targetFrame(size: Prefs.panelSize, corner: corner, screen: screen)
+        let mode = Prefs.viewMode
+        if mode == .minimal {
+            showDimmer(on: screen)
+        }
+
+        let frame = targetFrame(size: size(for: mode), corner: corner, screen: screen)
 
         // Parte ligeiramente "de dentro" do canto, com fade — movimento
         // curto e suave, como os paineis do sistema.
@@ -59,6 +97,7 @@ final class PanelController: ObservableObject {
         isVisible = false
         watchTimer?.invalidate()
         watchTimer = nil
+        hideDimmer()
 
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.18
@@ -70,7 +109,42 @@ final class PanelController: ObservableObject {
         })
     }
 
+    /// Reaplica modo de exibição/tamanho com o painel aberto (chamado
+    /// quando as preferências mudam ou o modo é trocado pelo cabeçalho).
+    func refreshAppearance() {
+        guard isVisible, let panel, let screen = lastScreen else { return }
+
+        let mode = Prefs.viewMode
+        if mode == .minimal {
+            showDimmer(on: screen)
+        } else {
+            hideDimmer()
+        }
+
+        let frame = targetFrame(size: size(for: mode), corner: lastCorner, screen: screen)
+        guard frame != panel.frame else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().setFrame(frame, display: true)
+        }
+    }
+
     // MARK: - Internals
+
+    private func preferredCorner() -> HotCorner {
+        let corners = Prefs.corners
+        if corners.contains(.bottomRight) { return .bottomRight }
+        return HotCorner.allCases.first(where: { corners.contains($0) }) ?? .bottomRight
+    }
+
+    private func size(for mode: ViewMode) -> NSSize {
+        switch mode {
+        case .grid: return Prefs.panelSize
+        case .list: return NSSize(width: 460, height: 500)
+        case .minimal: return NSSize(width: 360, height: 540)
+        }
+    }
 
     private func ensurePanel() -> PeekPanel {
         if let panel { return panel }
@@ -87,6 +161,44 @@ final class PanelController: ObservableObject {
 
         self.panel = panel
         return panel
+    }
+
+    private func showDimmer(on screen: NSScreen) {
+        let window: DimmerWindow
+        if let dimmer {
+            window = dimmer
+        } else {
+            window = DimmerWindow()
+            window.onClick = { [weak self] in
+                Task { @MainActor in self?.hide() }
+            }
+            dimmer = window
+        }
+
+        window.setFrame(screen.frame, display: false)
+        guard !window.isVisible || window.alphaValue < 1 else { return }
+        window.alphaValue = 0
+        window.orderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.24
+            window.animator().alphaValue = 1
+        }
+    }
+
+    private func hideDimmer() {
+        guard let dimmer, dimmer.isVisible else { return }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.18
+            dimmer.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            Task { @MainActor in
+                guard let self, let dimmer = self.dimmer else { return }
+                // Só remove se ninguém voltou a precisar dele no meio do fade.
+                if dimmer.alphaValue == 0 {
+                    dimmer.orderOut(nil)
+                }
+            }
+        })
     }
 
     private func targetFrame(size: NSSize, corner: HotCorner, screen: NSScreen) -> NSRect {
@@ -109,8 +221,8 @@ final class PanelController: ObservableObject {
         return NSRect(origin: origin, size: NSSize(width: width, height: height))
     }
 
-    /// Esconde o painel quando o mouse sai dele por um instante
-    /// (mas nunca durante um arrasto e nunca quando fixado).
+    /// Esconde o painel quando o mouse se afasta dele além da margem
+    /// configurada (mas nunca durante um arrasto e nunca quando fixado).
     private func startAutoHideWatcher() {
         watchTimer?.invalidate()
         let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -129,12 +241,13 @@ final class PanelController: ObservableObject {
         }
 
         let mouse = NSEvent.mouseLocation
-        let inside = panel.frame.insetBy(dx: -24, dy: -24).contains(mouse)
+        let margin = Prefs.hideMargin
+        let inside = panel.frame.insetBy(dx: -margin, dy: -margin).contains(mouse)
         let dragging = NSEvent.pressedMouseButtons != 0
 
         if inside || dragging {
             lastMouseInside = Date()
-        } else if Date().timeIntervalSince(lastMouseInside) > 0.35 {
+        } else if Date().timeIntervalSince(lastMouseInside) > 0.6 {
             hide()
         }
     }

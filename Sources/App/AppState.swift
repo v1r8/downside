@@ -21,9 +21,9 @@ final class AppState {
     }
 
     func start() {
-        hotCorner.onTrigger = { screen in
+        hotCorner.onTrigger = { screen, corner in
             Task { @MainActor in
-                AppState.shared.panelController.show(on: screen)
+                AppState.shared.panelController.show(on: screen, corner: corner)
             }
         }
         hotCorner.start()
@@ -53,5 +53,6 @@ final class AppState {
             lastFolderPath = url.path
             folderMonitor.update(folderURL: url)
         }
+        panelController.refreshAppearance()
     }
 }

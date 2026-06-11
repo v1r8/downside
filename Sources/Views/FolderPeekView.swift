@@ -1,9 +1,10 @@
 import SwiftUI
 import AppKit
 
-/// Conteúdo do painel: cabeçalho + grid de arquivos com multi-seleção.
+/// Conteúdo do painel: cabeçalho + arquivos no modo de exibição escolhido
+/// (grade, lista ou minimalista).
 ///
-/// Seleção suportada:
+/// Seleção suportada em todos os modos:
 ///  - clique simples seleciona; clique duplo abre
 ///  - ⌘-clique alterna item; ⇧-clique seleciona intervalo
 ///  - clicar e arrastar em área vazia desenha o retângulo de seleção
@@ -12,6 +13,8 @@ struct FolderPeekView: View {
     @EnvironmentObject private var monitor: FolderMonitor
     @EnvironmentObject private var panel: PanelController
 
+    @AppStorage(PrefKey.viewMode) private var viewModeRaw = ViewMode.grid.rawValue
+
     @State private var selection: Set<URL> = []
     @State private var anchorIndex: Int?
     @State private var itemFrames: [URL: CGRect] = [:]
@@ -19,18 +22,40 @@ struct FolderPeekView: View {
 
     private let gridSpace = "downside.grid"
 
+    private var mode: ViewMode {
+        ViewMode(rawValue: viewModeRaw) ?? .grid
+    }
+
     var body: some View {
+        // No minimalista o texto fica branco com sombra sobre a tela
+        // escurecida, então forçamos o esquema escuro.
+        if mode == .minimal {
+            core.environment(\.colorScheme, .dark)
+        } else {
+            core
+        }
+    }
+
+    private var core: some View {
         VStack(spacing: 0) {
             header
-            Divider().opacity(0.4)
+            if mode != .minimal {
+                Divider().opacity(0.4)
+            }
             content
         }
-        .background(PanelBackground())
+        .background {
+            if mode != .minimal {
+                PanelBackground()
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .overlay {
+            if mode != .minimal {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .peekSelectAll)) { _ in
             selection = Set(monitor.items.map(\.url))
         }
@@ -38,6 +63,10 @@ struct FolderPeekView: View {
             // Remove da seleção arquivos que sumiram da pasta.
             let valid = Set(items.map(\.url))
             selection.formIntersection(valid)
+        }
+        .onChange(of: viewModeRaw) { _, _ in
+            itemFrames = [:]
+            Task { @MainActor in panel.refreshAppearance() }
         }
     }
 
@@ -48,15 +77,29 @@ struct FolderPeekView: View {
             Image(nsImage: NSWorkspace.shared.icon(forFile: monitor.folderURL.path))
                 .resizable()
                 .frame(width: 18, height: 18)
+                .opacity(mode == .minimal ? 0.85 : 1)
 
             Text(monitor.folderURL.lastPathComponent)
                 .font(.system(size: 13, weight: .semibold))
+                .minimalShadow(mode == .minimal)
 
             Text(subtitle)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
+                .minimalShadow(mode == .minimal)
 
             Spacer()
+
+            Picker("Modo de exibição", selection: $viewModeRaw) {
+                ForEach(ViewMode.allCases) { mode in
+                    Image(systemName: mode.icon)
+                        .help(mode.label)
+                        .tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
 
             Button {
                 panel.isPinned.toggle()
@@ -95,7 +138,7 @@ struct FolderPeekView: View {
         return monitor.items.count == 1 ? "1 item" : "\(monitor.items.count) itens"
     }
 
-    // MARK: - Grid
+    // MARK: - Conteúdo
 
     @ViewBuilder
     private var content: some View {
@@ -104,16 +147,9 @@ struct FolderPeekView: View {
         } else {
             ScrollView {
                 ZStack(alignment: .topLeading) {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 92, maximum: 116), spacing: 6)],
-                        spacing: 6
-                    ) {
-                        ForEach(monitor.items) { item in
-                            cell(for: item)
-                        }
-                    }
-                    .padding(10)
-                    .background(rubberBandCatcher)
+                    layout
+                        .padding(mode == .grid ? 10 : 8)
+                        .background(rubberBandCatcher)
 
                     if let rect = rubberBand {
                         RoundedRectangle(cornerRadius: 2)
@@ -135,8 +171,46 @@ struct FolderPeekView: View {
         }
     }
 
-    private func cell(for item: FileItem) -> some View {
-        FileCell(item: item, isSelected: selection.contains(item.url))
+    @ViewBuilder
+    private var layout: some View {
+        switch mode {
+        case .grid:
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 92, maximum: 116), spacing: 6)],
+                spacing: 6
+            ) {
+                ForEach(monitor.items) { item in
+                    interactive(item) {
+                        FileCell(item: item, isSelected: selection.contains(item.url))
+                    }
+                }
+            }
+        case .list:
+            LazyVStack(spacing: 2) {
+                ForEach(monitor.items) { item in
+                    interactive(item) {
+                        FileRow(item: item, isSelected: selection.contains(item.url))
+                    }
+                }
+            }
+        case .minimal:
+            LazyVStack(alignment: .leading, spacing: 1) {
+                ForEach(monitor.items) { item in
+                    interactive(item) {
+                        MinimalFileRow(item: item, isSelected: selection.contains(item.url))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Aplica a cada item os comportamentos comuns a todos os modos:
+    /// rastreio de posição (rubber band), cliques, arrasto e menu.
+    private func interactive<Content: View>(
+        _ item: FileItem,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
             .background(
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -157,7 +231,7 @@ struct FolderPeekView: View {
             .contextMenu { contextMenu(for: item) }
     }
 
-    /// Camada atrás do grid que captura cliques/arrastos em área vazia.
+    /// Camada atrás dos itens que captura cliques/arrastos em área vazia.
     private var rubberBandCatcher: some View {
         Color.clear
             .contentShape(Rectangle())
@@ -195,6 +269,7 @@ struct FolderPeekView: View {
             Text("Pasta vazia")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
+                .minimalShadow(mode == .minimal)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -274,5 +349,18 @@ private struct ItemFramePreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [URL: CGRect], nextValue: () -> [URL: CGRect]) {
         value.merge(nextValue()) { _, new in new }
+    }
+}
+
+extension View {
+    /// Sombra para o texto continuar legível sobre a tela escurecida
+    /// do modo minimalista.
+    @ViewBuilder
+    func minimalShadow(_ active: Bool) -> some View {
+        if active {
+            shadow(color: .black.opacity(0.8), radius: 2, y: 1)
+        } else {
+            self
+        }
     }
 }

@@ -6,9 +6,14 @@ cara dos paineis nativos do macOS.
 
 ## Funcionalidades
 
-- **Canto ativo**: leve o mouse ao canto configurado (padrão: inferior
-  direito) e o painel desliza para dentro da tela. Afaste o mouse e ele
-  some sozinho. Há um botão de 📌 para mantê-lo aberto.
+- **Cantos ativos**: ative um ou mais cantos da tela (padrão: inferior
+  direito) e o painel desliza para dentro a partir do canto tocado.
+  Ele fecha sozinho quando o mouse se afasta além de uma distância
+  ajustável nas configurações. Há um botão de 📌 para mantê-lo aberto.
+- **Três modos de exibição** (troca no cabeçalho do painel ou nas
+  configurações): **Grade** com miniaturas, **Lista** com preview,
+  tamanho e data, e **Minimalista** — só os nomes dos arquivos, sem
+  fundo, sobre um leve escurecimento da tela.
 - **Multi-seleção como no Finder**:
   - clique simples seleciona, clique duplo abre;
   - ⌘-clique alterna itens, ⇧-clique seleciona intervalo;
