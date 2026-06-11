@@ -147,4 +147,18 @@ enum Prefs {
         let h = UserDefaults.standard.double(forKey: PrefKey.panelHeight)
         return NSSize(width: w > 200 ? w : 560, height: h > 160 ? h : 420)
     }
+
+    /// Tamanho que o usuário deu ao painel arrastando pelas bordas,
+    /// memorizado por modo de exibição.
+    static func savedPanelSize(for mode: ViewMode) -> NSSize? {
+        let w = UserDefaults.standard.double(forKey: "panelSize.\(mode.rawValue).w")
+        let h = UserDefaults.standard.double(forKey: "panelSize.\(mode.rawValue).h")
+        guard w >= 300, h >= 240 else { return nil }
+        return NSSize(width: w, height: h)
+    }
+
+    static func savePanelSize(_ size: NSSize, for mode: ViewMode) {
+        UserDefaults.standard.set(Double(size.width), forKey: "panelSize.\(mode.rawValue).w")
+        UserDefaults.standard.set(Double(size.height), forKey: "panelSize.\(mode.rawValue).h")
+    }
 }

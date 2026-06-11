@@ -39,11 +39,24 @@ final class PeekPanel: NSPanel {
             onClose?()
             return
         }
-        // Cmd+A → selecionar tudo no grid
-        if event.modifierFlags.contains(.command),
-           event.charactersIgnoringModifiers?.lowercased() == "a" {
-            NotificationCenter.default.post(name: .peekSelectAll, object: nil)
-            return
+        if event.modifierFlags.contains(.command) {
+            let key = event.charactersIgnoringModifiers?.lowercased()
+
+            // Painel sem menu principal: atalhos de edição de texto do
+            // campo de busca precisam ser roteados manualmente.
+            if let editor = firstResponder as? NSTextView {
+                switch key {
+                case "a": editor.selectAll(nil); return
+                case "c": editor.copy(nil); return
+                case "v": editor.paste(nil); return
+                case "x": editor.cut(nil); return
+                default: break
+                }
+            } else if key == "a" {
+                // Cmd+A fora do campo de busca → selecionar todos os itens.
+                NotificationCenter.default.post(name: .peekSelectAll, object: nil)
+                return
+            }
         }
         super.keyDown(with: event)
     }

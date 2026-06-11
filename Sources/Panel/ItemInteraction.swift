@@ -13,6 +13,8 @@ struct ItemInteraction: NSViewRepresentable {
     var dragURLs: () -> [URL]
     var menu: () -> NSMenu?
     var onHover: (Bool, NSRect) -> Void
+    var onDragStarted: () -> Void = {}
+    var onDragEnded: () -> Void = {}
 
     func makeNSView(context: Context) -> InteractionView {
         let view = InteractionView()
@@ -31,6 +33,8 @@ struct ItemInteraction: NSViewRepresentable {
         view.dragURLs = dragURLs
         view.menuProvider = menu
         view.onHover = onHover
+        view.onDragStarted = onDragStarted
+        view.onDragEnded = onDragEnded
     }
 }
 
@@ -41,6 +45,8 @@ final class InteractionView: NSView, NSDraggingSource {
     var dragURLs: (() -> [URL])?
     var menuProvider: (() -> NSMenu?)?
     var onHover: ((Bool, NSRect) -> Void)?
+    var onDragStarted: (() -> Void)?
+    var onDragEnded: (() -> Void)?
 
     private var downEvent: NSEvent?
     private var didDrag = false
@@ -130,6 +136,18 @@ final class InteractionView: NSView, NSDraggingSource {
         sourceOperationMaskFor context: NSDraggingContext
     ) -> NSDragOperation {
         [.copy, .move, .generic]
+    }
+
+    func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
+        onDragStarted?()
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        onDragEnded?()
     }
 }
 

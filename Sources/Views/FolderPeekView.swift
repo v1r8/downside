@@ -22,6 +22,7 @@ struct FolderPeekView: View {
     @State private var anchorIndex: Int?
     @State private var itemFrames: [URL: CGRect] = [:]
     @State private var rubberBand: CGRect?
+    @State private var searchText = ""
 
     private let gridSpace = "downside.grid"
 
@@ -32,6 +33,19 @@ struct FolderPeekView: View {
     private var scale: CGFloat {
         let value = CGFloat(uiScaleRaw)
         return (0.8...2.0).contains(value) ? value : 1.0
+    }
+
+    private var parsedQuery: ParsedQuery? {
+        let trimmed = searchText.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        let query = NaturalSearch.parse(trimmed)
+        return query.isEmpty ? nil : query
+    }
+
+    /// Itens visíveis: todos, ou o resultado da busca.
+    private var displayedItems: [FileItem] {
+        guard let query = parsedQuery else { return monitor.items }
+        return monitor.items.filter { NaturalSearch.matches($0, query: query) }
     }
 
     var body: some View {
@@ -47,11 +61,41 @@ struct FolderPeekView: View {
     private var core: some View {
         VStack(spacing: 0) {
             header
+
+            if let query = parsedQuery {
+                Text(query.summary)
+                    .font(.system(size: 10 * scale))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14 * scale)
+                    .padding(.bottom, 4 * scale)
+                    .minimalShadow(mode == .minimal)
+            }
+
+            if panel.isDraggingFromPanel || !panel.stackURLs.isEmpty {
+                DropStackBar(scale: scale)
+            }
+
             if mode != .minimal {
                 Divider().opacity(0.4)
             }
             content
         }
+        .overlay(alignment: .topTrailing) {
+            if !selection.isEmpty {
+                Text("\(selection.count)")
+                    .font(.system(size: 11 * scale, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8 * scale)
+                    .padding(.vertical, 3 * scale)
+                    .background(Capsule().fill(Color.accentColor))
+                    .padding(.top, 42 * scale)
+                    .padding(.trailing, 10 * scale)
+                    .allowsHitTesting(false)
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.25), value: selection.count)
         .background {
             if mode != .minimal {
                 PanelBackground()
@@ -65,7 +109,7 @@ struct FolderPeekView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .peekSelectAll)) { _ in
-            selection = Set(monitor.items.map(\.url))
+            selection = Set(displayedItems.map(\.url))
         }
         .onChange(of: monitor.items) { _, items in
             // Remove da seleção arquivos que sumiram da pasta.
@@ -83,32 +127,23 @@ struct FolderPeekView: View {
 
     private var header: some View {
         HStack(spacing: 8 * scale) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: monitor.folderURL.path))
-                .resizable()
-                .frame(width: 18 * scale, height: 18 * scale)
-                .opacity(mode == .minimal ? 0.85 : 1)
-
-            Text(monitor.folderURL.lastPathComponent)
-                .font(.system(size: 13 * scale, weight: .semibold))
-                .minimalShadow(mode == .minimal)
-
-            Text(subtitle)
-                .font(.system(size: 11 * scale))
-                .foregroundStyle(.secondary)
-                .minimalShadow(mode == .minimal)
-
-            Spacer()
-
-            Picker("Modo de exibição", selection: $viewModeRaw) {
-                ForEach(ViewMode.allCases) { mode in
-                    Image(systemName: mode.icon)
-                        .help(mode.label)
-                        .tag(mode.rawValue)
+            // Clicar no nome/ícone da pasta abre no Finder.
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([monitor.folderURL])
+            } label: {
+                HStack(spacing: 6 * scale) {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: monitor.folderURL.path))
+                        .resizable()
+                        .frame(width: 18 * scale, height: 18 * scale)
+                        .opacity(mode == .minimal ? 0.85 : 1)
+                    Text(monitor.folderURL.lastPathComponent)
+                        .font(.system(size: 13 * scale, weight: .semibold))
+                        .minimalShadow(mode == .minimal)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            .help("Abrir no Finder")
+
+            searchField
 
             Group {
                 Button {
@@ -117,13 +152,6 @@ struct FolderPeekView: View {
                     Image(systemName: panel.isPinned ? "pin.fill" : "pin")
                 }
                 .help(panel.isPinned ? "Liberar painel" : "Manter painel aberto")
-
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([monitor.folderURL])
-                } label: {
-                    Image(systemName: "arrow.up.forward.app")
-                }
-                .help("Abrir no Finder")
 
                 Button {
                     SettingsOpener.open()
@@ -139,21 +167,38 @@ struct FolderPeekView: View {
         .padding(.vertical, 10 * scale)
     }
 
-    private var subtitle: String {
-        if !selection.isEmpty {
-            return "\(selection.count) de \(monitor.items.count) selecionados"
+    private var searchField: some View {
+        HStack(spacing: 4 * scale) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10 * scale))
+                .foregroundStyle(.secondary)
+
+            TextField("Buscar (ex.: pdfs de hoje)", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12 * scale))
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10 * scale))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+            }
         }
-        if monitor.isTruncated {
-            return "\(monitor.items.count) itens mais recentes"
-        }
-        return monitor.items.count == 1 ? "1 item" : "\(monitor.items.count) itens"
+        .padding(.horizontal, 8 * scale)
+        .padding(.vertical, 4 * scale)
+        .background(Capsule().fill(Color.primary.opacity(0.07)))
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Conteúdo
 
     @ViewBuilder
     private var content: some View {
-        if monitor.items.isEmpty {
+        if displayedItems.isEmpty {
             emptyState
         } else {
             ScrollView {
@@ -191,7 +236,7 @@ struct FolderPeekView: View {
                 columns: [GridItem(.adaptive(minimum: 92 * scale, maximum: 116 * scale), spacing: 6 * scale)],
                 spacing: 6 * scale
             ) {
-                ForEach(monitor.items) { item in
+                ForEach(displayedItems) { item in
                     interactive(item) {
                         FileCell(item: item, isSelected: selection.contains(item.url), scale: scale)
                     }
@@ -199,7 +244,7 @@ struct FolderPeekView: View {
             }
         case .list:
             LazyVStack(spacing: 2) {
-                ForEach(monitor.items) { item in
+                ForEach(displayedItems) { item in
                     interactive(item) {
                         FileRow(item: item, isSelected: selection.contains(item.url), scale: scale)
                     }
@@ -207,7 +252,7 @@ struct FolderPeekView: View {
             }
         case .minimal:
             LazyVStack(alignment: .leading, spacing: 1) {
-                ForEach(monitor.items) { item in
+                ForEach(displayedItems) { item in
                     interactive(item) {
                         MinimalFileRow(item: item, isSelected: selection.contains(item.url), scale: scale)
                     }
@@ -245,7 +290,9 @@ struct FolderPeekView: View {
                         } else {
                             panel.preview.unhover(item.url)
                         }
-                    }
+                    },
+                    onDragStarted: { panel.isDraggingFromPanel = true },
+                    onDragEnded: { panel.isDraggingFromPanel = false }
                 )
             )
     }
@@ -290,10 +337,10 @@ struct FolderPeekView: View {
 
     private var emptyState: some View {
         VStack(spacing: 8) {
-            Image(systemName: "tray")
+            Image(systemName: parsedQuery != nil ? "magnifyingglass" : "tray")
                 .font(.system(size: 32 * scale))
                 .foregroundStyle(.tertiary)
-            Text("Pasta vazia")
+            Text(parsedQuery != nil ? "Nada encontrado para a busca" : "Pasta vazia")
                 .font(.system(size: 13 * scale))
                 .foregroundStyle(.secondary)
                 .minimalShadow(mode == .minimal)

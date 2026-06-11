@@ -25,7 +25,15 @@ cara dos paineis nativos do macOS.
   configurável) e um cartão mostra o conteúdo — primeira página de PDF,
   imagem, planilha, e a lista de arquivos dentro de pastas.
 - **Tamanho da interface ajustável** (80%–180%): fontes, ícones,
-  previews e o próprio painel.
+  previews e o próprio painel — que também pode ser **redimensionado
+  pelas bordas**, com o tamanho memorizado por modo de exibição.
+- **Pilha temporária**: comece a arrastar um item e uma zona de soltar
+  aparece fixa no topo do painel; solte ali para empilhar, role a lista
+  para juntar mais arquivos e depois arraste a pilha inteira para onde
+  quiser.
+- **Busca em linguagem natural** (local, instantânea): "pdfs de hoje",
+  "imagens grandes", "planilhas dessa semana", "zip maior que 50 mb",
+  "contrato ontem" — o painel mostra como interpretou a busca.
 - **Menu de contexto**: Abrir, Mostrar no Finder, Copiar e Mover para o
   Lixo — agindo sobre toda a seleção.
 - **Thumbnails Quick Look** com cache, atualização da pasta em tempo real

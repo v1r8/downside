@@ -37,6 +37,14 @@ final class PanelController: ObservableObject {
     /// Preview flutuante de hover (compartilhado com a view do painel).
     let preview = PreviewController()
 
+    /// Pilha temporária de arquivos (drop stack) — sobrevive a abrir e
+    /// fechar o painel, até ser limpa.
+    @Published var stackURLs: [URL] = []
+
+    /// True enquanto um arrasto iniciado no painel está em andamento;
+    /// usado para exibir a zona de soltar da pilha.
+    @Published var isDraggingFromPanel = false
+
     private(set) var isVisible = false
 
     private let folderMonitor: FolderMonitor
@@ -126,12 +134,30 @@ final class PanelController: ObservableObject {
         }
 
         let frame = targetFrame(size: size(for: mode), corner: lastCorner, screen: screen)
-        guard frame != panel.frame else { return }
+        // Compara apenas o tamanho: depois de um redimensionamento manual
+        // o painel pode estar em outra posição, e não deve ser "puxado"
+        // de volta ao canto enquanto está aberto.
+        guard frame.size != panel.frame.size, !panel.inLiveResize else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().setFrame(frame, display: true)
         }
+    }
+
+    // MARK: - Pilha temporária
+
+    func addToStack(_ url: URL) {
+        guard !stackURLs.contains(url) else { return }
+        stackURLs.append(url)
+    }
+
+    func removeFromStack(_ url: URL) {
+        stackURLs.removeAll { $0 == url }
+    }
+
+    func clearStack() {
+        stackURLs.removeAll()
     }
 
     // MARK: - Internals
@@ -143,6 +169,10 @@ final class PanelController: ObservableObject {
     }
 
     private func size(for mode: ViewMode) -> NSSize {
+        // Tamanho ajustado manualmente pelo usuário tem prioridade.
+        if let saved = Prefs.savedPanelSize(for: mode) {
+            return saved
+        }
         let scale = Prefs.uiScale
         let base: NSSize
         switch mode {
@@ -159,6 +189,20 @@ final class PanelController: ObservableObject {
         let panel = PeekPanel()
         panel.onClose = { [weak self] in
             Task { @MainActor in self?.hide() }
+        }
+
+        // Redimensionável pelas bordas/cantos, com memória por modo.
+        panel.styleMask.insert(.resizable)
+        panel.minSize = NSSize(width: 300, height: 240)
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didEndLiveResizeNotification,
+            object: panel,
+            queue: .main
+        ) { [weak panel] _ in
+            Task { @MainActor in
+                guard let panel else { return }
+                Prefs.savePanelSize(panel.frame.size, for: Prefs.viewMode)
+            }
         }
 
         let root = FolderPeekView()
