@@ -57,6 +57,11 @@ final class PanelController: ObservableObject {
     /// usado para exibir a zona de soltar da pilha.
     @Published var isDraggingFromPanel = false
 
+    /// True quando o painel foi aberto no meio de um arrasto vindo de
+    /// fora (canto ativo durante drag) — mantém as zonas de soltar
+    /// visíveis até o botão do mouse ser solto.
+    @Published var externalDragActive = false
+
     private(set) var isVisible = false
 
     private let folderMonitor: FolderMonitor
@@ -105,6 +110,7 @@ final class PanelController: ObservableObject {
         panel.makeKeyAndOrderFront(nil)
         isVisible = true
         lastMouseInside = Date()
+        externalDragActive = NSEvent.pressedMouseButtons != 0
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.24
@@ -134,6 +140,7 @@ final class PanelController: ObservableObject {
             NSEvent.removeMonitor(monitor)
             outsideClickMonitor = nil
         }
+        externalDragActive = false
         preview.dismiss()
         hideDimmer()
 
@@ -327,6 +334,9 @@ final class PanelController: ObservableObject {
 
     private func autoHideTick() {
         guard isVisible, let panel else { return }
+        if externalDragActive, NSEvent.pressedMouseButtons == 0 {
+            externalDragActive = false
+        }
         if isPinned || !Prefs.autoHideEnabled {
             lastMouseInside = Date()
             return

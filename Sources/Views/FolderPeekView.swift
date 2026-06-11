@@ -24,6 +24,7 @@ struct FolderPeekView: View {
     @State private var itemFrames: [URL: CGRect] = [:]
     @State private var rubberBand: CGRect?
     @State private var searchText = ""
+    @State private var expandedStackID: UUID?
 
     private let gridSpace = "downside.grid"
 
@@ -73,14 +74,36 @@ struct FolderPeekView: View {
                     .minimalShadow(mode == .minimal)
             }
 
-            if panel.isDraggingFromPanel || panel.hasStacks {
-                DropStackBar(scale: scale)
+            if panel.isDraggingFromPanel || panel.externalDragActive || panel.hasStacks {
+                DropStackBar(scale: scale, expanded: $expandedStackID)
+                    .anchorPreference(key: StackBarAnchorKey.self, value: .bounds) { $0 }
             }
 
             if mode != .minimal {
                 Divider().opacity(0.4)
             }
             content
+        }
+        // Conteúdo da pilha como cartão flutuante logo abaixo da barra —
+        // sobre o conteúdo, sem empurrar o grid (evita cliques perdidos).
+        .overlayPreferenceValue(StackBarAnchorKey.self) { anchor in
+            GeometryReader { proxy in
+                if let anchor, let id = expandedStackID,
+                   let stack = panel.stacks.first(where: { $0.id == id }) {
+                    StackDetailOverlay(stack: stack, scale: scale) {
+                        expandedStackID = nil
+                    }
+                    .padding(.horizontal, 12 * scale)
+                    .offset(y: proxy[anchor].maxY + 2)
+                    .transition(.scale(scale: 0.92, anchor: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.32, dampingFraction: 0.78), value: expandedStackID)
+        }
+        .onChange(of: panel.stacks) { _, stacks in
+            if let id = expandedStackID, !stacks.contains(where: { $0.id == id }) {
+                expandedStackID = nil
+            }
         }
         .background {
             if mode != .minimal {
@@ -470,6 +493,14 @@ private struct ItemFramePreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [URL: CGRect], nextValue: () -> [URL: CGRect]) {
         value.merge(nextValue()) { _, new in new }
+    }
+}
+
+private struct StackBarAnchorKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>?
+
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
     }
 }
 

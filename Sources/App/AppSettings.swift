@@ -64,6 +64,26 @@ enum ViewMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Categorias de conteúdo do preview, para ajuste de tamanho individual.
+enum PreviewCategory: String, CaseIterable, Identifiable {
+    case image, pdf, text, table, folder, audio
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .image: return "Imagens e outros"
+        case .pdf: return "PDFs"
+        case .text: return "Texto"
+        case .table: return "Tabelas (CSV)"
+        case .folder: return "Pastas"
+        case .audio: return "Áudio"
+        }
+    }
+
+    var prefKey: String { "previewSize.\(rawValue)" }
+}
+
 enum PrefKey {
     static let folderPath = "folderPath"
     /// Antiga preferência de canto único (mantida para migração).
@@ -154,6 +174,14 @@ enum Prefs {
     /// geral da interface).
     static var hoverPreviewSize: CGFloat {
         let value = UserDefaults.standard.double(forKey: PrefKey.hoverPreviewSize)
+        guard value >= 0.7, value <= 1.8 else { return 1.0 }
+        return CGFloat(value)
+    }
+
+    /// Ajuste fino de tamanho do preview por categoria de arquivo,
+    /// multiplicado sobre o tamanho geral.
+    static func previewCategorySize(_ category: PreviewCategory) -> CGFloat {
+        let value = UserDefaults.standard.double(forKey: category.prefKey)
         guard value >= 0.7, value <= 1.8 else { return 1.0 }
         return CGFloat(value)
     }

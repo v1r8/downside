@@ -107,6 +107,13 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                DisclosureGroup("Tamanho por categoria") {
+                    ForEach(PreviewCategory.allCases) { category in
+                        PreviewCategorySizeRow(category: category)
+                            .disabled(!hoverPreviewEnabled)
+                    }
+                }
             }
 
             Section("Geral") {
@@ -190,6 +197,30 @@ struct SettingsView: View {
             }
         } catch {
             launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+}
+
+/// Slider de tamanho do preview para uma categoria de arquivo,
+/// multiplicado sobre o tamanho geral.
+private struct PreviewCategorySizeRow: View {
+    let category: PreviewCategory
+    @AppStorage private var size: Double
+
+    init(category: PreviewCategory) {
+        self.category = category
+        _size = AppStorage(wrappedValue: 1.0, category.prefKey)
+    }
+
+    var body: some View {
+        HStack {
+            Text(category.label)
+                .frame(width: 130, alignment: .leading)
+            Slider(value: $size, in: 0.7...1.8)
+            Text("\(Int(size * 100))%")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .trailing)
         }
     }
 }

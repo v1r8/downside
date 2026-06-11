@@ -35,6 +35,18 @@ enum PreviewContent {
         if case .audio = self { return true }
         return false
     }
+
+    /// Categoria usada para o ajuste de tamanho por tipo de arquivo.
+    var sizeCategory: PreviewCategory {
+        switch self {
+        case .image, .icon: return .image
+        case .pdf: return .pdf
+        case .text, .event: return .text
+        case .table: return .table
+        case .folder: return .folder
+        case .audio: return .audio
+        }
+    }
 }
 
 enum PreviewBuilder {
@@ -242,7 +254,7 @@ final class PreviewController {
         guard currentURL == item.url, !Task.isCancelled else { return }
 
         let scale = Prefs.uiScale
-        let sizeFactor = Prefs.hoverPreviewSize
+        let sizeFactor = Prefs.hoverPreviewSize * Prefs.previewCategorySize(content.sizeCategory)
         let card = PreviewCard(
             item: item,
             content: content,
@@ -577,64 +589,6 @@ struct AudioPlayerView: View {
     private func timeString(_ time: TimeInterval) -> String {
         let total = Int(time.rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
-    }
-}
-
-struct TextFilePreview: View {
-    let url: URL
-    let scale: CGFloat
-    let sizeFactor: CGFloat
-
-    @State private var text = ""
-    @State private var loaded = false
-    @State private var status = ""
-    @State private var saveTask: Task<Void, Never>?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4 * scale) {
-            TextEditor(text: $text)
-                .font(.system(size: 12 * scale, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .frame(height: 260 * scale * sizeFactor)
-                .padding(4 * scale)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.primary.opacity(0.05))
-                )
-
-            Text(status.isEmpty ? "Edição com salvamento automático · ⌘Z desfaz, ⇧⌘Z refaz" : status)
-                .font(.system(size: 9 * scale))
-                .foregroundStyle(.secondary)
-        }
-        .onAppear(perform: load)
-        .onChange(of: text) { _, newValue in
-            guard loaded else { return }
-            scheduleSave(newValue)
-        }
-    }
-
-    private func load() {
-        guard !loaded else { return }
-        text = (try? String(contentsOf: url, encoding: .utf8))
-            ?? (try? String(contentsOf: url, encoding: .isoLatin1))
-            ?? ""
-        loaded = true
-    }
-
-    private func scheduleSave(_ value: String) {
-        saveTask?.cancel()
-        saveTask = Task {
-            try? await Task.sleep(nanoseconds: 800_000_000)
-            guard !Task.isCancelled else { return }
-            do {
-                try value.write(to: url, atomically: true, encoding: .utf8)
-                status = "Salvo ✓"
-            } catch {
-                status = "Não foi possível salvar"
-            }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            if !Task.isCancelled { status = "" }
-        }
     }
 }
 

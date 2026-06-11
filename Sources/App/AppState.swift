@@ -22,11 +22,15 @@ final class AppState {
 
     func start() {
         // Canto ativo alterna: abre se fechado, fecha se aberto.
+        // Durante um arrasto nunca fecha — abre para receber o drop.
         hotCorner.onTrigger = { screen, corner in
             Task { @MainActor in
                 let controller = AppState.shared.panelController
+                let dragging = NSEvent.pressedMouseButtons != 0
                 if controller.isVisible {
-                    controller.hide()
+                    if !dragging {
+                        controller.hide()
+                    }
                 } else {
                     controller.show(on: screen, corner: corner)
                 }

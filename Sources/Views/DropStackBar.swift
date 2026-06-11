@@ -4,56 +4,43 @@ import UniformTypeIdentifiers
 
 /// Faixa fixa no topo do painel com as pilhas temporárias (até 3, lado
 /// a lado). Durante um arrasto aparece também o alvo de nova pilha.
-/// Clicar numa pilha expande a lista do que há dentro.
+/// Clicar numa pilha abre o conteúdo num cartão flutuante (overlay),
+/// sem empurrar o resto do painel.
 struct DropStackBar: View {
     @EnvironmentObject private var panel: PanelController
     let scale: CGFloat
-
-    @State private var expandedStack: UUID?
+    @Binding var expanded: UUID?
 
     var body: some View {
-        VStack(spacing: 6 * scale) {
-            HStack(spacing: 8 * scale) {
-                ForEach(panel.stacks) { stack in
-                    StackChip(
-                        stack: stack,
-                        scale: scale,
-                        isExpanded: expandedStack == stack.id,
-                        onToggleExpand: { toggleExpanded(stack.id) }
-                    )
-                    .transition(.scale(scale: 0.85).combined(with: .opacity))
-                }
-
-                if panel.isDraggingFromPanel, panel.stacks.count < PanelController.maxStacks {
-                    NewStackTarget(scale: scale)
-                        .transition(.scale(scale: 0.85).combined(with: .opacity))
-                }
+        HStack(spacing: 8 * scale) {
+            ForEach(panel.stacks) { stack in
+                StackChip(
+                    stack: stack,
+                    scale: scale,
+                    isExpanded: expanded == stack.id,
+                    onToggleExpand: {
+                        expanded = expanded == stack.id ? nil : stack.id
+                    }
+                )
+                .transition(.scale(scale: 0.85).combined(with: .opacity))
             }
 
-            if let id = expandedStack, let stack = panel.stacks.first(where: { $0.id == id }) {
-                StackDetail(stack: stack, scale: scale)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+            if panel.isDraggingFromPanel || panel.externalDragActive,
+               panel.stacks.count < PanelController.maxStacks {
+                NewStackTarget(scale: scale)
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
             }
         }
         .padding(.horizontal, 12 * scale)
         .padding(.bottom, 6 * scale)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: panel.stacks)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: panel.isDraggingFromPanel)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: expandedStack)
-        .onChange(of: panel.stacks) { _, stacks in
-            if let id = expandedStack, !stacks.contains(where: { $0.id == id }) {
-                expandedStack = nil
-            }
-        }
-    }
-
-    private func toggleExpanded(_ id: UUID) {
-        expandedStack = expandedStack == id ? nil : id
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: panel.externalDragActive)
     }
 }
 
 /// Pilha compacta: ícones em leque + contagem. Arrastável (leva tudo),
-/// alvo de drop, clique expande.
+/// alvo de drop, clique abre o conteúdo.
 private struct StackChip: View {
     @EnvironmentObject private var panel: PanelController
     let stack: FileStack
@@ -178,42 +165,55 @@ private struct NewStackTarget: View {
     }
 }
 
-/// Conteúdo expandido de uma pilha: lista com remoção individual.
-private struct StackDetail: View {
+/// Cartão flutuante com o conteúdo da pilha: a pilha "abre" com os
+/// itens caindo em leque para uma lista com previews. Cada linha é
+/// arrastável individualmente.
+struct StackDetailOverlay: View {
     @EnvironmentObject private var panel: PanelController
     let stack: FileStack
     let scale: CGFloat
+    var onClose: () -> Void
+
+    @State private var appeared = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Pilha · \(stack.urls.count) \(stack.urls.count == 1 ? "item" : "itens")")
+                    .font(.system(size: 11 * scale, weight: .semibold))
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13 * scale))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Fechar")
+            }
+            .padding(.horizontal, 10 * scale)
+            .padding(.vertical, 7 * scale)
+
+            Divider().opacity(0.4)
+
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(stack.urls, id: \.self) { url in
-                        HStack(spacing: 6 * scale) {
-                            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                                .resizable()
-                                .frame(width: 16 * scale, height: 16 * scale)
-                            Text(url.lastPathComponent)
-                                .font(.system(size: 11 * scale))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer()
-                            Button {
-                                panel.removeFromStack(stack.id, url: url)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 10 * scale))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Remover da pilha")
-                        }
-                        .padding(.horizontal, 8 * scale)
-                        .padding(.vertical, 2 * scale)
+                LazyVStack(spacing: 2) {
+                    ForEach(Array(stack.urls.enumerated()), id: \.element) { index, url in
+                        row(url)
+                            .offset(y: appeared ? 0 : -14)
+                            .opacity(appeared ? 1 : 0)
+                            .rotationEffect(.degrees(appeared ? 0 : Double(min(index, 6)) * 1.5 - 1.5))
+                            .animation(
+                                .spring(response: 0.35, dampingFraction: 0.72)
+                                    .delay(Double(min(index, 10)) * 0.035),
+                                value: appeared
+                            )
                     }
                 }
+                .padding(6 * scale)
             }
-            .frame(maxHeight: 140 * scale)
+            .frame(maxHeight: 210 * scale)
+
+            Divider().opacity(0.4)
 
             HStack {
                 Button("Abrir todos") {
@@ -222,18 +222,77 @@ private struct StackDetail: View {
                 Spacer()
                 Button("Limpar pilha", role: .destructive) {
                     panel.clearStack(stack.id)
+                    onClose()
                 }
             }
             .font(.system(size: 10.5 * scale))
             .buttonStyle(.borderless)
-            .padding(.horizontal, 8 * scale)
-            .padding(.vertical, 4 * scale)
+            .padding(.horizontal, 10 * scale)
+            .padding(.vertical, 6 * scale)
         }
-        .padding(.vertical, 4 * scale)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
+        .background(VisualEffectView(material: .popover))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
         )
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+        .onAppear { appeared = true }
+    }
+
+    private func row(_ url: URL) -> some View {
+        HStack(spacing: 6 * scale) {
+            HStack(spacing: 8 * scale) {
+                ThumbnailView(url: url)
+                    .frame(width: 26 * scale, height: 26 * scale)
+                Text(url.lastPathComponent)
+                    .font(.system(size: 11.5 * scale))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 4)
+            }
+            .contentShape(Rectangle())
+            .overlay(
+                ItemInteraction(
+                    onMouseDown: { _ in },
+                    onClickUp: { _ in },
+                    onDoubleClick: { NSWorkspace.shared.open(url) },
+                    dragURLs: { [url] },
+                    menu: { rowMenu(url) },
+                    onHover: { _, _ in },
+                    onDragStarted: { panel.isDraggingFromPanel = true },
+                    onDragEnded: { panel.isDraggingFromPanel = false }
+                )
+            )
+
+            Button {
+                panel.removeFromStack(stack.id, url: url)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 10 * scale))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Remover da pilha")
+        }
+        .padding(.horizontal, 6 * scale)
+        .padding(.vertical, 2 * scale)
+    }
+
+    private func rowMenu(_ url: URL) -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(ActionMenuItem(title: "Abrir") {
+            NSWorkspace.shared.open(url)
+        })
+        menu.addItem(ActionMenuItem(title: "Mostrar no Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        })
+        menu.addItem(.separator())
+        let id = stack.id
+        menu.addItem(ActionMenuItem(title: "Remover da pilha") {
+            Task { @MainActor in AppState.shared.panelController.removeFromStack(id, url: url) }
+        })
+        return menu
     }
 }
 
