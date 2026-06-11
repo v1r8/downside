@@ -1,10 +1,12 @@
 # Publica um release com o .app zipado + appcast.xml assinado para o
-# Sparkle sempre que uma tag v* é enviada. Ver README → "Atualizações".
+# Sparkle. Dispara quando o arquivo VERSION muda (ou manualmente pela
+# aba Actions). A tag v<versão> é criada pelo próprio release.
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: ["**"]
+    paths: ["VERSION"]
   workflow_dispatch:
     inputs:
       version:
@@ -37,7 +39,7 @@ jobs:
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VERSION="${{ github.event.inputs.version }}"
           else
-            VERSION="${GITHUB_REF_NAME#v}"
+            VERSION="$(tr -d ' \n' < VERSION)"
           fi
           /usr/bin/sed -i '' "s/MARKETING_VERSION: .*/MARKETING_VERSION: $VERSION/" project.yml
           xcodegen generate
