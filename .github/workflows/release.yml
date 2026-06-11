@@ -5,6 +5,12 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão a publicar (ex.: 0.1.0)"
+        required: true
+        default: "0.1.0"
 
 permissions:
   contents: write
@@ -26,9 +32,13 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Set version from tag
+      - name: Set version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
           /usr/bin/sed -i '' "s/MARKETING_VERSION: .*/MARKETING_VERSION: $VERSION/" project.yml
           xcodegen generate
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
@@ -59,7 +69,7 @@ jobs:
           printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY_FILE"
           ./sparkle-tools/bin/generate_appcast \
             --ed-key-file "$KEY_FILE" \
-            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/" \
             -o dist/appcast.xml \
             dist
           rm -f "$KEY_FILE"
@@ -67,5 +77,6 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
           files: dist/*
           generate_release_notes: true
