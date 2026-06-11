@@ -32,10 +32,11 @@
 	<string>© 2026 v1r8</string>
 	<key>SUFeedURL</key>
 	<string>https://github.com/v1r8/downside/releases/latest/download/appcast.xml</string>
-	<!-- Gere o par de chaves com a ferramenta `generate_keys` do Sparkle e cole a
-	     chave PÚBLICA abaixo. Sem ela o Sparkle recusa atualizações (ver README). -->
+	<!-- Chave pública EdDSA que valida a assinatura das atualizações.
+	     O par correspondente (privado) vive no secret SPARKLE_PRIVATE_KEY
+	     do repositório e nunca é commitado. -->
 	<key>SUPublicEDKey</key>
-	<string></string>
+	<string>w7QtRLcyHz63xNPrXU7VZY4m+KU0xk70jFrUbjyfwU4=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 </dict>

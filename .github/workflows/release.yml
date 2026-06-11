@@ -42,6 +42,9 @@ jobs:
             VERSION="$(tr -d ' \n' < VERSION)"
           fi
           /usr/bin/sed -i '' "s/MARKETING_VERSION: .*/MARKETING_VERSION: $VERSION/" project.yml
+          # O Sparkle compara CFBundleVersion para detectar atualizações,
+          # então o número de build precisa sempre crescer.
+          /usr/bin/sed -i '' "s/CURRENT_PROJECT_VERSION: .*/CURRENT_PROJECT_VERSION: $GITHUB_RUN_NUMBER/" project.yml
           xcodegen generate
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
