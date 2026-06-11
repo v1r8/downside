@@ -1,0 +1,43 @@
+name: Downside
+options:
+  bundleIdPrefix: com.v1r8
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.6.0
+
+targets:
+  Downside:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    dependencies:
+      - package: Sparkle
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.v1r8.downside
+        PRODUCT_NAME: Downside
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/Info.plist
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+        COMBINE_HIDPI_IMAGES: YES
+
+schemes:
+  Downside:
+    build:
+      targets:
+        Downside: all
+    run:
+      config: Debug
+    archive:
+      config: Release
