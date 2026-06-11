@@ -119,6 +119,9 @@ final class PanelController: ObservableObject {
             panel.animator().setFrame(frame, display: true)
         }
 
+        // Player de áudio estacionado volta a se encaixar ao lado.
+        preview.dockSticky()
+
         startAutoHideWatcher()
 
         // Clique em qualquer outro app/área fora do painel fecha.
@@ -142,6 +145,8 @@ final class PanelController: ObservableObject {
         }
         externalDragActive = false
         preview.dismiss()
+        // O player de áudio fixado sobrevive: vai para o "estacionamento".
+        preview.parkSticky()
         hideDimmer()
 
         NSAnimationContext.runAnimationGroup({ context in

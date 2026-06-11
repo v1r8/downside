@@ -4,43 +4,59 @@ import UniformTypeIdentifiers
 
 /// Faixa fixa no topo do painel com as pilhas temporárias (até 3, lado
 /// a lado). Durante um arrasto aparece também o alvo de nova pilha.
-/// Clicar numa pilha abre o conteúdo num cartão flutuante (overlay),
-/// sem empurrar o resto do painel.
+/// Clicar numa pilha expande a seção (fundo mais claro) com o conteúdo
+/// em lista — os itens "caem" do leque um a um.
 struct DropStackBar: View {
     @EnvironmentObject private var panel: PanelController
     let scale: CGFloat
-    @Binding var expanded: UUID?
+
+    @State private var expanded: UUID?
 
     var body: some View {
-        HStack(spacing: 8 * scale) {
-            ForEach(panel.stacks) { stack in
-                StackChip(
-                    stack: stack,
-                    scale: scale,
-                    isExpanded: expanded == stack.id,
-                    onToggleExpand: {
-                        expanded = expanded == stack.id ? nil : stack.id
-                    }
-                )
-                .transition(.scale(scale: 0.85).combined(with: .opacity))
+        VStack(spacing: 6 * scale) {
+            HStack(spacing: 8 * scale) {
+                ForEach(panel.stacks) { stack in
+                    StackChip(
+                        stack: stack,
+                        scale: scale,
+                        isExpanded: expanded == stack.id,
+                        onToggleExpand: {
+                            expanded = expanded == stack.id ? nil : stack.id
+                        }
+                    )
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+                }
+
+                if panel.isDraggingFromPanel || panel.externalDragActive,
+                   panel.stacks.count < PanelController.maxStacks {
+                    NewStackTarget(scale: scale)
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+                }
             }
 
-            if panel.isDraggingFromPanel || panel.externalDragActive,
-               panel.stacks.count < PanelController.maxStacks {
-                NewStackTarget(scale: scale)
-                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+            if let id = expanded, let stack = panel.stacks.first(where: { $0.id == id }) {
+                StackDetail(stack: stack, scale: scale) {
+                    expanded = nil
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.horizontal, 12 * scale)
         .padding(.bottom, 6 * scale)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: panel.stacks)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: panel.isDraggingFromPanel)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: panel.externalDragActive)
+        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: panel.stacks)
+        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: panel.isDraggingFromPanel)
+        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: panel.externalDragActive)
+        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: expanded)
+        .onChange(of: panel.stacks) { _, stacks in
+            if let id = expanded, !stacks.contains(where: { $0.id == id }) {
+                expanded = nil
+            }
+        }
     }
 }
 
-/// Pilha compacta: ícones em leque + contagem. Arrastável (leva tudo),
-/// alvo de drop, clique abre o conteúdo.
+/// Pilha compacta: ícones em leque + contagem. Clique (simples ou
+/// duplo) só expande/recolhe; arrastar leva tudo.
 private struct StackChip: View {
     @EnvironmentObject private var panel: PanelController
     let stack: FileStack
@@ -94,7 +110,8 @@ private struct StackChip: View {
             ItemInteraction(
                 onMouseDown: { _ in },
                 onClickUp: { _ in onToggleExpand() },
-                onDoubleClick: { stack.urls.forEach { NSWorkspace.shared.open($0) } },
+                // Clique duplo também só alterna — nunca abre arquivos.
+                onDoubleClick: onToggleExpand,
                 dragURLs: { stack.urls },
                 menu: { contextMenu() },
                 onHover: { _, _ in },
@@ -102,7 +119,7 @@ private struct StackChip: View {
                 onDragEnded: { panel.isDraggingFromPanel = false }
             )
         )
-        .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
+        .onDrop(of: StackDropHandler.acceptedTypes, isTargeted: $targeted) { providers in
             StackDropHandler.accept(providers) { url in
                 panel.addToStack(stack.id, url: url)
             }
@@ -157,7 +174,7 @@ private struct NewStackTarget: View {
         )
         .scaleEffect(targeted ? 1.04 : 1)
         .animation(.spring(response: 0.25, dampingFraction: 0.7), value: targeted)
-        .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
+        .onDrop(of: StackDropHandler.acceptedTypes, isTargeted: $targeted) { providers in
             StackDropHandler.accept(providers) { url in
                 panel.addToStack(nil, url: url)
             }
@@ -165,10 +182,10 @@ private struct NewStackTarget: View {
     }
 }
 
-/// Cartão flutuante com o conteúdo da pilha: a pilha "abre" com os
-/// itens caindo em leque para uma lista com previews. Cada linha é
-/// arrastável individualmente.
-struct StackDetailOverlay: View {
+/// Seção expandida (fundo mais claro) com o conteúdo da pilha em lista,
+/// itens entrando em cascata. Linhas arrastáveis individualmente;
+/// clique duplo abre só aquele arquivo.
+private struct StackDetail: View {
     @EnvironmentObject private var panel: PanelController
     let stack: FileStack
     let scale: CGFloat
@@ -177,29 +194,12 @@ struct StackDetailOverlay: View {
     @State private var appeared = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Pilha · \(stack.urls.count) \(stack.urls.count == 1 ? "item" : "itens")")
-                    .font(.system(size: 11 * scale, weight: .semibold))
-                Spacer()
-                Button(action: onClose) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 13 * scale))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .help("Fechar")
-            }
-            .padding(.horizontal, 10 * scale)
-            .padding(.vertical, 7 * scale)
-
-            Divider().opacity(0.4)
-
+        VStack(alignment: .leading, spacing: 2) {
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(Array(stack.urls.enumerated()), id: \.element) { index, url in
                         row(url)
-                            .offset(y: appeared ? 0 : -14)
+                            .offset(y: appeared ? 0 : -12)
                             .opacity(appeared ? 1 : 0)
                             .rotationEffect(.degrees(appeared ? 0 : Double(min(index, 6)) * 1.5 - 1.5))
                             .animation(
@@ -211,9 +211,9 @@ struct StackDetailOverlay: View {
                 }
                 .padding(6 * scale)
             }
-            .frame(maxHeight: 210 * scale)
+            .frame(maxHeight: 190 * scale)
 
-            Divider().opacity(0.4)
+            Divider().opacity(0.3)
 
             HStack {
                 Button("Abrir todos") {
@@ -227,16 +227,13 @@ struct StackDetailOverlay: View {
             }
             .font(.system(size: 10.5 * scale))
             .buttonStyle(.borderless)
-            .padding(.horizontal, 10 * scale)
-            .padding(.vertical, 6 * scale)
+            .padding(.horizontal, 8 * scale)
+            .padding(.vertical, 5 * scale)
         }
-        .background(VisualEffectView(material: .popover))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
         )
-        .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
         .onAppear { appeared = true }
     }
 
@@ -296,27 +293,133 @@ struct StackDetailOverlay: View {
     }
 }
 
-/// Resolve providers de drop em URLs de arquivo.
+/// Resolve drops em URLs de arquivo. Versátil: arquivos locais entram
+/// direto; imagens arrastadas da web são salvas na pasta monitorada;
+/// links são baixados; texto vira .txt.
 enum StackDropHandler {
+    static let acceptedTypes: [UTType] = [.fileURL, .image, .url, .utf8PlainText]
+
     static func accept(_ providers: [NSItemProvider], add: @escaping (URL) -> Void) -> Bool {
         var accepted = false
-        for provider in providers
-        where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            accepted = true
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { data, _ in
-                let url: URL?
-                if let data = data as? Data {
-                    url = URL(dataRepresentation: data, relativeTo: nil)
-                } else if let direct = data as? URL {
-                    url = direct
-                } else {
-                    url = nil
-                }
-                if let url {
-                    Task { @MainActor in add(url) }
-                }
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                accepted = true
+                loadFileURL(provider, add: add)
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                accepted = true
+                saveImage(provider, add: add)
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+                accepted = true
+                resolveWebURL(provider, add: add)
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier) {
+                accepted = true
+                saveText(provider, add: add)
             }
         }
         return accepted
+    }
+
+    // MARK: - Origens
+
+    private static func loadFileURL(_ provider: NSItemProvider, add: @escaping (URL) -> Void) {
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { data, _ in
+            if let url = urlFrom(data) {
+                Task { @MainActor in add(url) }
+            }
+        }
+    }
+
+    private static func saveImage(_ provider: NSItemProvider, add: @escaping (URL) -> Void) {
+        let identifier = provider.registeredTypeIdentifiers.first {
+            UTType($0)?.conforms(to: .image) == true
+        }
+        guard let identifier else { return }
+        let ext = UTType(identifier)?.preferredFilenameExtension ?? "png"
+
+        provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
+            guard var data else { return }
+            var finalExt = ext
+            // TIFF (formato comum em drags) vira PNG, mais útil.
+            if finalExt == "tiff" || finalExt == "tif",
+               let rep = NSBitmapImageRep(data: data),
+               let png = rep.representation(using: .png, properties: [:]) {
+                data = png
+                finalExt = "png"
+            }
+            let destination = uniqueDestination(name: "Imagem \(timestamp())", ext: finalExt)
+            do {
+                try data.write(to: destination)
+                Task { @MainActor in add(destination) }
+            } catch {}
+        }
+    }
+
+    private static func resolveWebURL(_ provider: NSItemProvider, add: @escaping (URL) -> Void) {
+        provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { data, _ in
+            guard let url = urlFrom(data) else { return }
+            if url.isFileURL {
+                Task { @MainActor in add(url) }
+                return
+            }
+            // Link da web: baixa para a pasta monitorada.
+            Task {
+                guard let (temp, response) = try? await URLSession.shared.download(from: url) else { return }
+                var name = response.suggestedFilename ?? url.lastPathComponent
+                if name.isEmpty || name == "/" { name = "Download \(timestamp())" }
+                let destination = uniqueDestination(filename: name)
+                try? FileManager.default.moveItem(at: temp, to: destination)
+                await MainActor.run { add(destination) }
+            }
+        }
+    }
+
+    private static func saveText(_ provider: NSItemProvider, add: @escaping (URL) -> Void) {
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.utf8PlainText.identifier) { data, _ in
+            guard let data, !data.isEmpty else { return }
+            let destination = uniqueDestination(name: "Texto \(timestamp())", ext: "txt")
+            do {
+                try data.write(to: destination)
+                Task { @MainActor in add(destination) }
+            } catch {}
+        }
+    }
+
+    // MARK: - Helpers
+
+    private static func urlFrom(_ data: (any NSSecureCoding)?) -> URL? {
+        if let data = data as? Data {
+            return URL(dataRepresentation: data, relativeTo: nil)
+        }
+        if let url = data as? URL {
+            return url
+        }
+        if let string = data as? String {
+            return URL(string: string)
+        }
+        return nil
+    }
+
+    private static func timestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        return formatter.string(from: Date())
+    }
+
+    private static func uniqueDestination(name: String, ext: String) -> URL {
+        uniqueDestination(filename: "\(name).\(ext)")
+    }
+
+    private static func uniqueDestination(filename: String) -> URL {
+        let folder = Prefs.folderURL
+        var candidate = folder.appendingPathComponent(filename)
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var counter = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            let numbered = ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)"
+            candidate = folder.appendingPathComponent(numbered)
+            counter += 1
+        }
+        return candidate
     }
 }

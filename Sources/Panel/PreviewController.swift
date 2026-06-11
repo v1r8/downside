@@ -167,6 +167,12 @@ final class PreviewController {
     private(set) var isSticky = false
     private var mouseInsideCard = false
 
+    /// Posição "encaixada" (ao lado do painel) do preview fixado e
+    /// estado do vai-e-vem quando o painel fecha/abre.
+    private var stickyDockFrame: NSRect?
+    private var parked = false
+    private var animatingMove = false
+
     func frameContains(_ point: NSPoint) -> Bool {
         isShowing && panel?.frame.contains(point) == true
     }
@@ -270,16 +276,86 @@ final class PreviewController {
         panel.contentView = hosting
         panel.ignoresMouseEvents = !content.isInteractive
         isSticky = content.isSticky
+        // O player fixado pode ser arrastado por qualquer ponto.
+        panel.isMovableByWindowBackground = content.isSticky
+        parked = false
 
         guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(rect) })
             ?? NSScreen.main else { return }
         let origin = origin(for: size, near: rect, on: screen)
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        stickyDockFrame = panel.frame
 
         panel.alphaValue = 0
         panel.orderFront(nil)
         isShowing = true
         fadeIn(panel)
+    }
+
+    // MARK: - Player fixado: estacionar / reencaixar
+
+    /// Painel principal fechou: leva o player à posição memorizada
+    /// (ajustável arrastando), para não ficar "órfão" no meio da tela.
+    func parkSticky() {
+        guard isSticky, isShowing, let panel else { return }
+        parked = true
+        animateMove(panel, to: parkedOrigin(for: panel.frame.size))
+    }
+
+    /// Painel principal reabriu: traz o player de volta para o encaixe.
+    func dockSticky() {
+        guard isSticky, isShowing, parked, let panel else { return }
+        parked = false
+        let target = stickyDockFrame?.origin ?? panel.frame.origin
+        animateMove(panel, to: clamped(target, size: panel.frame.size))
+    }
+
+    private func parkedOrigin(for size: NSSize) -> NSPoint {
+        let x = UserDefaults.standard.double(forKey: "stickyPlayer.x")
+        let y = UserDefaults.standard.double(forKey: "stickyPlayer.y")
+        if x != 0 || y != 0 {
+            let saved = NSPoint(x: x, y: y)
+            if NSScreen.screens.contains(where: {
+                $0.visibleFrame.insetBy(dx: -40, dy: -40).contains(saved)
+            }) {
+                return clamped(saved, size: size)
+            }
+        }
+        if let area = NSScreen.main?.visibleFrame {
+            return NSPoint(x: area.maxX - size.width - 16, y: area.minY + 16)
+        }
+        return .zero
+    }
+
+    private func clamped(_ origin: NSPoint, size: NSSize) -> NSPoint {
+        guard let area = NSScreen.screens
+            .first(where: { $0.frame.contains(origin) })?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+        else { return origin }
+        let x = min(max(origin.x, area.minX + 8), area.maxX - size.width - 8)
+        let y = min(max(origin.y, area.minY + 8), area.maxY - size.height - 8)
+        return NSPoint(x: x, y: y)
+    }
+
+    private func animateMove(_ panel: NSPanel, to origin: NSPoint) {
+        animatingMove = true
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.32
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(
+                NSRect(origin: origin, size: panel.frame.size),
+                display: true
+            )
+        }, completionHandler: { [weak self] in
+            Task { @MainActor in self?.animatingMove = false }
+        })
+    }
+
+    /// Usuário arrastou o player estacionado: memoriza a posição.
+    private func windowMoved() {
+        guard isSticky, parked, !animatingMove, let panel else { return }
+        UserDefaults.standard.set(Double(panel.frame.origin.x), forKey: "stickyPlayer.x")
+        UserDefaults.standard.set(Double(panel.frame.origin.y), forKey: "stickyPlayer.y")
     }
 
     private func fadeIn(_ panel: NSPanel) {
@@ -294,6 +370,13 @@ final class PreviewController {
         let panel = PreviewPanel()
         panel.onClose = { [weak self] in
             Task { @MainActor in self?.forceDismiss() }
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.windowMoved() }
         }
         self.panel = panel
         return panel
@@ -441,21 +524,29 @@ struct PreviewCard: View {
             CSVTablePreview(url: url, scale: scale, sizeFactor: sizeFactor)
 
         case .event(let url):
-            VStack(spacing: 10 * scale) {
+            VStack(spacing: 8 * scale) {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                     .resizable()
-                    .frame(width: 64 * scale, height: 64 * scale)
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    Label("Adicionar à Agenda", systemImage: "calendar.badge.plus")
+                    .frame(width: 48 * scale, height: 48 * scale)
+                if let ics = ICSParser.parse(url: url) {
+                    Text(ics.title)
                         .font(.system(size: 12 * scale, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12 * scale)
-                        .padding(.vertical, 6 * scale)
-                        .background(Capsule().fill(Color.accentColor))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                    Text(ics.start.formatted(
+                        date: .abbreviated,
+                        time: ics.isAllDay ? .omitted : .shortened
+                    ))
+                    .font(.system(size: 10 * scale))
+                    .foregroundStyle(.secondary)
+                    if let location = ics.location, !location.isEmpty {
+                        Text(location)
+                            .font(.system(size: 10 * scale))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
-                .buttonStyle(.borderless)
+                CalendarAddButton(url: url, scale: scale)
             }
             .frame(maxWidth: .infinity)
 
@@ -500,6 +591,11 @@ struct PDFKitView: NSViewRepresentable {
 final class AudioPlayerModel: ObservableObject {
     @Published var isPlaying = false
     @Published var currentTime: TimeInterval = 0
+    @Published var rate: Float = 1.0 {
+        didSet {
+            player?.rate = rate
+        }
+    }
 
     let duration: TimeInterval
     private var player: AVAudioPlayer?
@@ -507,6 +603,7 @@ final class AudioPlayerModel: ObservableObject {
 
     init(url: URL) {
         player = try? AVAudioPlayer(contentsOf: url)
+        player?.enableRate = true
         duration = player?.duration ?? 0
     }
 
@@ -518,14 +615,20 @@ final class AudioPlayerModel: ObservableObject {
             timer?.invalidate()
         } else {
             player.play()
+            player.rate = rate
             isPlaying = true
             startTimer()
         }
     }
 
     func seek(to time: TimeInterval) {
-        player?.currentTime = time
-        currentTime = time
+        let clamped = min(max(0, time), duration)
+        player?.currentTime = clamped
+        currentTime = clamped
+    }
+
+    func skip(_ seconds: TimeInterval) {
+        seek(to: currentTime + seconds)
     }
 
     private func startTimer() {
@@ -555,21 +658,64 @@ struct AudioPlayerView: View {
     let scale: CGFloat
     @StateObject private var model: AudioPlayerModel
 
+    private static let speeds: [Float] = [1.0, 1.2, 1.5, 1.7, 2.0]
+
     init(url: URL, scale: CGFloat) {
         self.scale = scale
         _model = StateObject(wrappedValue: AudioPlayerModel(url: url))
     }
 
     var body: some View {
-        HStack(spacing: 10 * scale) {
-            Button {
-                model.toggle()
-            } label: {
-                Image(systemName: model.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 28 * scale))
-                    .foregroundStyle(Color.accentColor)
+        VStack(spacing: 7 * scale) {
+            HStack(spacing: 14 * scale) {
+                Button {
+                    model.skip(-10)
+                } label: {
+                    Image(systemName: "gobackward.10")
+                        .font(.system(size: 15 * scale))
+                }
+                .help("Voltar 10 s")
+
+                Button {
+                    model.toggle()
+                } label: {
+                    Image(systemName: model.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 30 * scale))
+                }
+                .help(model.isPlaying ? "Pausar" : "Reproduzir")
+
+                Button {
+                    model.skip(10)
+                } label: {
+                    Image(systemName: "goforward.10")
+                        .font(.system(size: 15 * scale))
+                }
+                .help("Avançar 10 s")
+
+                Spacer()
+
+                Menu {
+                    ForEach(Self.speeds, id: \.self) { speed in
+                        Button {
+                            model.rate = speed
+                        } label: {
+                            if speed == model.rate {
+                                Label(speedLabel(speed), systemImage: "checkmark")
+                            } else {
+                                Text(speedLabel(speed))
+                            }
+                        }
+                    }
+                } label: {
+                    Text(speedLabel(model.rate))
+                        .font(.system(size: 10.5 * scale, weight: .semibold, design: .monospaced))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Velocidade de reprodução")
             }
             .buttonStyle(.borderless)
+            .foregroundStyle(.primary)
 
             Slider(
                 value: Binding(
@@ -578,12 +724,24 @@ struct AudioPlayerView: View {
                 ),
                 in: 0...max(model.duration, 1)
             )
+            .controlSize(.small)
 
-            Text("\(timeString(model.currentTime)) / \(timeString(model.duration))")
-                .font(.system(size: 10 * scale, design: .monospaced))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(timeString(model.currentTime))
+                Spacer()
+                Text(timeString(model.duration))
+            }
+            .font(.system(size: 9.5 * scale, design: .monospaced))
+            .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 4 * scale)
+        .padding(.vertical, 2 * scale)
+    }
+
+    private func speedLabel(_ speed: Float) -> String {
+        let text = speed == 1 || speed == 2
+            ? String(Int(speed))
+            : String(format: "%.1f", speed).replacingOccurrences(of: ".", with: ",")
+        return "\(text)×"
     }
 
     private func timeString(_ time: TimeInterval) -> String {

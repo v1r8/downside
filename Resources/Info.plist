@@ -28,6 +28,10 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>O Downside adiciona eventos de arquivos .ics diretamente à sua agenda.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>O Downside adiciona eventos de arquivos .ics diretamente à sua agenda.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 v1r8</string>
 	<key>SUFeedURL</key>

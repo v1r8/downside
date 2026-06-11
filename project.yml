@@ -22,10 +22,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.v1r8.downside
         PRODUCT_NAME: Downside
-        MARKETING_VERSION: 0.7.0
+        MARKETING_VERSION: 0.8.0
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/Downside.entitlements
         SWIFT_VERSION: "5.0"
         SWIFT_STRICT_CONCURRENCY: minimal
         ENABLE_HARDENED_RUNTIME: YES

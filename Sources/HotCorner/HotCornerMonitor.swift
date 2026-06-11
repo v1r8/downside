@@ -40,11 +40,13 @@ final class HotCornerMonitor {
         }
 
         let corners = Prefs.corners
-        if let corner = corners.first(where: { $0.zone(in: screen.frame, size: 6).contains(mouse) }) {
+        // Durante um arrasto (de qualquer app), a zona do canto fica
+        // maior e o painel abre mais rápido, para facilitar soltar
+        // direto nas pilhas.
+        let dragging = NSEvent.pressedMouseButtons != 0
+        let zoneSize: CGFloat = dragging ? 28 : 6
+        if let corner = corners.first(where: { $0.zone(in: screen.frame, size: zoneSize).contains(mouse) }) {
             guard armed else { return }
-            // Durante um arrasto (de qualquer app), abre mais rápido para
-            // permitir soltar nas pilhas do painel.
-            let dragging = NSEvent.pressedMouseButtons != 0
             let threshold = dragging ? min(0.2, Prefs.dwell) : Prefs.dwell
             if dwellCorner == corner, let start = dwellStart {
                 if Date().timeIntervalSince(start) >= threshold {
