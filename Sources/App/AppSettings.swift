@@ -74,6 +74,9 @@ enum PrefKey {
     static let hotCornerEnabled = "hotCornerEnabled"
     static let hideMargin = "hideMargin"
     static let viewMode = "viewMode"
+    static let uiScale = "uiScale"
+    static let hoverPreviewEnabled = "hoverPreviewEnabled"
+    static let hoverPreviewDelay = "hoverPreviewDelay"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -120,6 +123,23 @@ enum Prefs {
 
     static var viewMode: ViewMode {
         ViewMode(rawValue: UserDefaults.standard.string(forKey: PrefKey.viewMode) ?? "") ?? .grid
+    }
+
+    /// Fator de escala da interface (fontes, ícones, previews, painel).
+    static var uiScale: CGFloat {
+        let value = UserDefaults.standard.double(forKey: PrefKey.uiScale)
+        guard value >= 0.8, value <= 2.0 else { return 1.0 }
+        return CGFloat(value)
+    }
+
+    static var hoverPreviewEnabled: Bool {
+        UserDefaults.standard.object(forKey: PrefKey.hoverPreviewEnabled) as? Bool ?? true
+    }
+
+    /// Tempo parado sobre um item antes do preview aparecer.
+    static var hoverPreviewDelay: TimeInterval {
+        let value = UserDefaults.standard.double(forKey: PrefKey.hoverPreviewDelay)
+        return value > 0 ? value : 0.8
     }
 
     static var panelSize: NSSize {

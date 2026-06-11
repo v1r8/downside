@@ -4,16 +4,19 @@ import AppKit
 /// Conteúdo do painel: cabeçalho + arquivos no modo de exibição escolhido
 /// (grade, lista ou minimalista).
 ///
-/// Seleção suportada em todos os modos:
-///  - clique simples seleciona; clique duplo abre
+/// Seleção (comportamento do Finder, em todos os modos):
+///  - clique seleciona (no mouse-down); clique duplo abre
 ///  - ⌘-clique alterna item; ⇧-clique seleciona intervalo
-///  - clicar e arrastar em área vazia desenha o retângulo de seleção
+///  - arrastar de área vazia desenha o retângulo de seleção
+///  - arrastar um item selecionado leva TODOS os selecionados
 ///  - ⌘A seleciona tudo; Esc fecha o painel
+///  - parar o mouse sobre um item abre o preview (configurável)
 struct FolderPeekView: View {
     @EnvironmentObject private var monitor: FolderMonitor
     @EnvironmentObject private var panel: PanelController
 
     @AppStorage(PrefKey.viewMode) private var viewModeRaw = ViewMode.grid.rawValue
+    @AppStorage(PrefKey.uiScale) private var uiScaleRaw = 1.0
 
     @State private var selection: Set<URL> = []
     @State private var anchorIndex: Int?
@@ -24,6 +27,11 @@ struct FolderPeekView: View {
 
     private var mode: ViewMode {
         ViewMode(rawValue: viewModeRaw) ?? .grid
+    }
+
+    private var scale: CGFloat {
+        let value = CGFloat(uiScaleRaw)
+        return (0.8...2.0).contains(value) ? value : 1.0
     }
 
     var body: some View {
@@ -66,25 +74,26 @@ struct FolderPeekView: View {
         }
         .onChange(of: viewModeRaw) { _, _ in
             itemFrames = [:]
-            Task { @MainActor in panel.refreshAppearance() }
+            panel.preview.dismiss()
+            panel.refreshAppearance()
         }
     }
 
     // MARK: - Cabeçalho
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 8 * scale) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: monitor.folderURL.path))
                 .resizable()
-                .frame(width: 18, height: 18)
+                .frame(width: 18 * scale, height: 18 * scale)
                 .opacity(mode == .minimal ? 0.85 : 1)
 
             Text(monitor.folderURL.lastPathComponent)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13 * scale, weight: .semibold))
                 .minimalShadow(mode == .minimal)
 
             Text(subtitle)
-                .font(.system(size: 11))
+                .font(.system(size: 11 * scale))
                 .foregroundStyle(.secondary)
                 .minimalShadow(mode == .minimal)
 
@@ -101,31 +110,33 @@ struct FolderPeekView: View {
             .labelsHidden()
             .fixedSize()
 
-            Button {
-                panel.isPinned.toggle()
-            } label: {
-                Image(systemName: panel.isPinned ? "pin.fill" : "pin")
-            }
-            .help(panel.isPinned ? "Liberar painel" : "Manter painel aberto")
+            Group {
+                Button {
+                    panel.isPinned.toggle()
+                } label: {
+                    Image(systemName: panel.isPinned ? "pin.fill" : "pin")
+                }
+                .help(panel.isPinned ? "Liberar painel" : "Manter painel aberto")
 
-            Button {
-                NSWorkspace.shared.activateFileViewerSelecting([monitor.folderURL])
-            } label: {
-                Image(systemName: "arrow.up.forward.app")
-            }
-            .help("Abrir no Finder")
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([monitor.folderURL])
+                } label: {
+                    Image(systemName: "arrow.up.forward.app")
+                }
+                .help("Abrir no Finder")
 
-            Button {
-                SettingsOpener.open()
-            } label: {
-                Image(systemName: "gearshape")
+                Button {
+                    SettingsOpener.open()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .help("Configurações")
             }
-            .help("Configurações")
+            .font(.system(size: 13 * scale))
         }
         .buttonStyle(.borderless)
-        .imageScale(.medium)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14 * scale)
+        .padding(.vertical, 10 * scale)
     }
 
     private var subtitle: String {
@@ -148,8 +159,8 @@ struct FolderPeekView: View {
             ScrollView {
                 ZStack(alignment: .topLeading) {
                     layout
-                        .padding(mode == .grid ? 10 : 8)
-                        .background(rubberBandCatcher)
+                        .padding(mode == .grid ? 10 * scale : 12 * scale)
+                        .background(emptyAreaCatcher)
 
                     if let rect = rubberBand {
                         RoundedRectangle(cornerRadius: 2)
@@ -164,6 +175,7 @@ struct FolderPeekView: View {
                     }
                 }
                 .coordinateSpace(name: gridSpace)
+                .simultaneousGesture(rubberBandGesture)
             }
             .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
                 itemFrames = frames
@@ -176,12 +188,12 @@ struct FolderPeekView: View {
         switch mode {
         case .grid:
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 92, maximum: 116), spacing: 6)],
-                spacing: 6
+                columns: [GridItem(.adaptive(minimum: 92 * scale, maximum: 116 * scale), spacing: 6 * scale)],
+                spacing: 6 * scale
             ) {
                 ForEach(monitor.items) { item in
                     interactive(item) {
-                        FileCell(item: item, isSelected: selection.contains(item.url))
+                        FileCell(item: item, isSelected: selection.contains(item.url), scale: scale)
                     }
                 }
             }
@@ -189,7 +201,7 @@ struct FolderPeekView: View {
             LazyVStack(spacing: 2) {
                 ForEach(monitor.items) { item in
                     interactive(item) {
-                        FileRow(item: item, isSelected: selection.contains(item.url))
+                        FileRow(item: item, isSelected: selection.contains(item.url), scale: scale)
                     }
                 }
             }
@@ -197,7 +209,7 @@ struct FolderPeekView: View {
             LazyVStack(alignment: .leading, spacing: 1) {
                 ForEach(monitor.items) { item in
                     interactive(item) {
-                        MinimalFileRow(item: item, isSelected: selection.contains(item.url))
+                        MinimalFileRow(item: item, isSelected: selection.contains(item.url), scale: scale)
                     }
                 }
             }
@@ -205,7 +217,8 @@ struct FolderPeekView: View {
     }
 
     /// Aplica a cada item os comportamentos comuns a todos os modos:
-    /// rastreio de posição (rubber band), cliques, arrasto e menu.
+    /// rastreio de posição (rubber band) e a camada nativa de interação
+    /// (cliques, arrasto múltiplo, menu de contexto e hover).
     private func interactive<Content: View>(
         _ item: FileItem,
         @ViewBuilder content: () -> Content
@@ -219,65 +232,79 @@ struct FolderPeekView: View {
                     )
                 }
             )
-            .simultaneousGesture(
-                TapGesture(count: 1).onEnded { handleClick(on: item) }
+            .overlay(
+                ItemInteraction(
+                    onMouseDown: { modifiers in mouseDown(on: item, modifiers: modifiers) },
+                    onClickUp: { modifiers in clickUp(on: item, modifiers: modifiers) },
+                    onDoubleClick: { open(targets(for: item)) },
+                    dragURLs: { dragTargets(for: item) },
+                    menu: { contextMenu(for: item) },
+                    onHover: { hovering, rect in
+                        if hovering {
+                            panel.preview.hover(item: item, near: rect)
+                        } else {
+                            panel.preview.unhover(item.url)
+                        }
+                    }
+                )
             )
-            .simultaneousGesture(
-                TapGesture(count: 2).onEnded { open([item.url]) }
-            )
-            .onDrag {
-                NSItemProvider(contentsOf: item.url) ?? NSItemProvider()
-            }
-            .contextMenu { contextMenu(for: item) }
     }
 
-    /// Camada atrás dos itens que captura cliques/arrastos em área vazia.
-    private var rubberBandCatcher: some View {
+    /// Camada atrás dos itens: clique em área vazia limpa a seleção.
+    private var emptyAreaCatcher: some View {
         Color.clear
             .contentShape(Rectangle())
             .onTapGesture {
                 selection.removeAll()
                 anchorIndex = nil
             }
-            .gesture(
-                DragGesture(minimumDistance: 4, coordinateSpace: .named(gridSpace))
-                    .onChanged { value in
-                        let rect = CGRect(
-                            x: min(value.startLocation.x, value.location.x),
-                            y: min(value.startLocation.y, value.location.y),
-                            width: abs(value.location.x - value.startLocation.x),
-                            height: abs(value.location.y - value.startLocation.y)
-                        )
-                        rubberBand = rect
-                        selection = Set(
-                            itemFrames
-                                .filter { $0.value.intersects(rect) }
-                                .map(\.key)
-                        )
-                    }
-                    .onEnded { _ in
-                        rubberBand = nil
-                    }
-            )
+    }
+
+    /// Retângulo de seleção: só inicia em área vazia (sobre um item, o
+    /// arrasto é dos arquivos). Funciona nos três modos.
+    private var rubberBandGesture: some Gesture {
+        DragGesture(minimumDistance: 5, coordinateSpace: .named(gridSpace))
+            .onChanged { value in
+                if rubberBand == nil {
+                    let startedOnItem = itemFrames.contains { $0.value.contains(value.startLocation) }
+                    if startedOnItem { return }
+                    panel.preview.dismiss()
+                }
+                let rect = CGRect(
+                    x: min(value.startLocation.x, value.location.x),
+                    y: min(value.startLocation.y, value.location.y),
+                    width: abs(value.location.x - value.startLocation.x),
+                    height: abs(value.location.y - value.startLocation.y)
+                )
+                rubberBand = rect
+                selection = Set(
+                    itemFrames
+                        .filter { $0.value.intersects(rect) }
+                        .map(\.key)
+                )
+            }
+            .onEnded { _ in
+                rubberBand = nil
+            }
     }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "tray")
-                .font(.system(size: 32))
+                .font(.system(size: 32 * scale))
                 .foregroundStyle(.tertiary)
             Text("Pasta vazia")
-                .font(.system(size: 13))
+                .font(.system(size: 13 * scale))
                 .foregroundStyle(.secondary)
                 .minimalShadow(mode == .minimal)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Seleção
+    // MARK: - Seleção (semântica do Finder)
 
-    private func handleClick(on item: FileItem) {
-        let modifiers = NSEvent.modifierFlags
+    private func mouseDown(on item: FileItem, modifiers: NSEvent.ModifierFlags) {
+        panel.preview.dismiss()
         guard let index = monitor.items.firstIndex(of: item) else { return }
 
         if modifiers.contains(.command) {
@@ -290,14 +317,25 @@ struct FolderPeekView: View {
         } else if modifiers.contains(.shift), let anchor = anchorIndex {
             let range = min(anchor, index)...max(anchor, index)
             selection.formUnion(monitor.items[range].map(\.url))
-        } else {
+        } else if !selection.contains(item.url) {
             selection = [item.url]
             anchorIndex = index
         }
+        // Item já selecionado sem modificador: mantém o grupo intacto
+        // para permitir arrastar todos; o colapso acontece no mouse-up.
     }
 
-    /// Alvo das ações de contexto: a seleção, se o item clicado fizer
-    /// parte dela; senão, apenas o item clicado (como no Finder).
+    private func clickUp(on item: FileItem, modifiers: NSEvent.ModifierFlags) {
+        guard modifiers.isDisjoint(with: [.command, .shift]),
+              selection.contains(item.url),
+              selection.count > 1
+        else { return }
+        selection = [item.url]
+        anchorIndex = monitor.items.firstIndex(of: item)
+    }
+
+    /// Alvo das ações: a seleção, se o item fizer parte dela; senão,
+    /// apenas o item (como no Finder). Mantém a ordem da listagem.
     private func targets(for item: FileItem) -> [URL] {
         if selection.contains(item.url) {
             return monitor.items.filter { selection.contains($0.url) }.map(\.url)
@@ -305,24 +343,35 @@ struct FolderPeekView: View {
         return [item.url]
     }
 
+    private func dragTargets(for item: FileItem) -> [URL] {
+        targets(for: item)
+    }
+
     // MARK: - Ações
 
-    @ViewBuilder
-    private func contextMenu(for item: FileItem) -> some View {
+    private func contextMenu(for item: FileItem) -> NSMenu {
+        panel.preview.dismiss()
+        if !selection.contains(item.url) {
+            selection = [item.url]
+            anchorIndex = monitor.items.firstIndex(of: item)
+        }
         let urls = targets(for: item)
         let suffix = urls.count > 1 ? " (\(urls.count) itens)" : ""
 
-        Button("Abrir\(suffix)") { open(urls) }
-        Button("Mostrar no Finder") {
+        let menu = NSMenu()
+        menu.addItem(ActionMenuItem(title: "Abrir\(suffix)") { open(urls) })
+        menu.addItem(ActionMenuItem(title: "Mostrar no Finder") {
             NSWorkspace.shared.activateFileViewerSelecting(urls)
-        }
-        Divider()
-        Button("Copiar\(suffix)") { copyToPasteboard(urls) }
-        Divider()
-        Button("Mover para o Lixo\(suffix)", role: .destructive) { moveToTrash(urls) }
+        })
+        menu.addItem(.separator())
+        menu.addItem(ActionMenuItem(title: "Copiar\(suffix)") { copyToPasteboard(urls) })
+        menu.addItem(.separator())
+        menu.addItem(ActionMenuItem(title: "Mover para o Lixo\(suffix)") { moveToTrash(urls) })
+        return menu
     }
 
     private func open(_ urls: [URL]) {
+        panel.preview.dismiss()
         urls.forEach { NSWorkspace.shared.open($0) }
         if !panel.isPinned {
             panel.hide()

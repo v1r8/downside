@@ -34,6 +34,9 @@ final class PanelController: ObservableObject {
     /// Com o pin ativo o painel não se esconde sozinho.
     @Published var isPinned = false
 
+    /// Preview flutuante de hover (compartilhado com a view do painel).
+    let preview = PreviewController()
+
     private(set) var isVisible = false
 
     private let folderMonitor: FolderMonitor
@@ -97,6 +100,7 @@ final class PanelController: ObservableObject {
         isVisible = false
         watchTimer?.invalidate()
         watchTimer = nil
+        preview.dismiss()
         hideDimmer()
 
         NSAnimationContext.runAnimationGroup({ context in
@@ -139,11 +143,14 @@ final class PanelController: ObservableObject {
     }
 
     private func size(for mode: ViewMode) -> NSSize {
+        let scale = Prefs.uiScale
+        let base: NSSize
         switch mode {
-        case .grid: return Prefs.panelSize
-        case .list: return NSSize(width: 460, height: 500)
-        case .minimal: return NSSize(width: 360, height: 540)
+        case .grid: base = Prefs.panelSize
+        case .list: base = NSSize(width: 460, height: 500)
+        case .minimal: base = NSSize(width: 360, height: 540)
         }
+        return NSSize(width: base.width * scale, height: base.height * scale)
     }
 
     private func ensurePanel() -> PeekPanel {

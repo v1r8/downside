@@ -4,21 +4,22 @@ import AppKit
 struct FileCell: View {
     let item: FileItem
     let isSelected: Bool
+    var scale: CGFloat = 1
 
     var body: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 5 * scale) {
             ThumbnailView(url: item.url)
-                .frame(width: 60, height: 60)
+                .frame(width: 60 * scale, height: 60 * scale)
 
             Text(item.name)
-                .font(.system(size: 11))
+                .font(.system(size: 11 * scale))
                 .lineLimit(2)
                 .truncationMode(.middle)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 4)
+        .padding(.vertical, 8 * scale)
+        .padding(.horizontal, 4 * scale)
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -26,7 +27,6 @@ struct FileCell: View {
         )
         .contentShape(Rectangle())
         .animation(.easeOut(duration: 0.1), value: isSelected)
-        .help(item.name)
     }
 }
 
@@ -34,6 +34,7 @@ struct FileCell: View {
 struct FileRow: View {
     let item: FileItem
     let isSelected: Bool
+    var scale: CGFloat = 1
 
     private static let sizeFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -48,31 +49,30 @@ struct FileRow: View {
     }()
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 8 * scale) {
             ThumbnailView(url: item.url)
-                .frame(width: 28, height: 28)
+                .frame(width: 28 * scale, height: 28 * scale)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.name)
-                    .font(.system(size: 12))
+                    .font(.system(size: 12 * scale))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(detail)
-                    .font(.system(size: 10))
+                    .font(.system(size: 10 * scale))
                     .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 8)
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
+        .padding(.vertical, 4 * scale)
+        .padding(.horizontal, 8 * scale)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
         )
         .contentShape(Rectangle())
-        .help(item.name)
     }
 
     private var detail: String {
@@ -89,23 +89,23 @@ struct FileRow: View {
 struct MinimalFileRow: View {
     let item: FileItem
     let isSelected: Bool
+    var scale: CGFloat = 1
 
     var body: some View {
         Text(item.name)
-            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+            .font(.system(size: 13 * scale, weight: isSelected ? .semibold : .regular))
             .lineLimit(1)
             .truncationMode(.middle)
             .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.85))
             .shadow(color: .black.opacity(0.8), radius: 2, y: 1)
-            .padding(.vertical, 3)
-            .padding(.horizontal, 10)
+            .padding(.vertical, 3 * scale)
+            .padding(.horizontal, 10 * scale)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 Capsule()
                     .fill(isSelected ? Color.accentColor.opacity(0.45) : Color.clear)
             )
             .contentShape(Rectangle())
-            .help(item.name)
     }
 }
 

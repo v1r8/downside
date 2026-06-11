@@ -19,8 +19,13 @@ cara dos paineis nativos do macOS.
   - ⌘-clique alterna itens, ⇧-clique seleciona intervalo;
   - **clicar e arrastar em área vazia** desenha o retângulo de seleção;
   - ⌘A seleciona tudo, Esc fecha o painel.
-- **Arrastar para fora**: arraste um arquivo do painel para o Finder,
-  Mail, etc.
+- **Arrastar para fora**: arraste a seleção inteira do painel para o
+  Finder, Mail, etc. — todos os arquivos selecionados vão juntos.
+- **Preview ao parar o mouse**: pare o cursor sobre um item (tempo
+  configurável) e um cartão mostra o conteúdo — primeira página de PDF,
+  imagem, planilha, e a lista de arquivos dentro de pastas.
+- **Tamanho da interface ajustável** (80%–180%): fontes, ícones,
+  previews e o próprio painel.
 - **Menu de contexto**: Abrir, Mostrar no Finder, Copiar e Mover para o
   Lixo — agindo sobre toda a seleção.
 - **Thumbnails Quick Look** com cache, atualização da pasta em tempo real

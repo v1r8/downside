@@ -10,6 +10,9 @@ struct SettingsView: View {
     @AppStorage(PrefKey.hotCornerEnabled) private var hotCornerEnabled = true
     @AppStorage(PrefKey.hideMargin) private var hideMargin = 220.0
     @AppStorage(PrefKey.viewMode) private var viewModeRaw = ViewMode.grid.rawValue
+    @AppStorage(PrefKey.uiScale) private var uiScale = 1.0
+    @AppStorage(PrefKey.hoverPreviewEnabled) private var hoverPreviewEnabled = true
+    @AppStorage(PrefKey.hoverPreviewDelay) private var hoverPreviewDelay = 0.8
 
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
@@ -61,6 +64,29 @@ struct SettingsView: View {
                         Text("Área antes de fechar")
                     }
                     Text("O painel fecha quando o mouse se afasta ~\(Int(hideMargin)) px dele")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading) {
+                    Slider(value: $uiScale, in: 0.8...1.8) {
+                        Text("Tamanho da interface")
+                    }
+                    Text("Interface em \(Int(uiScale * 100))% — fontes, ícones, previews e painel")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Preview ao parar o mouse") {
+                Toggle("Mostrar preview do item sob o mouse", isOn: $hoverPreviewEnabled)
+
+                VStack(alignment: .leading) {
+                    Slider(value: $hoverPreviewDelay, in: 0.2...2.5) {
+                        Text("Tempo até aparecer")
+                    }
+                    .disabled(!hoverPreviewEnabled)
+                    Text(String(format: "%.1f s parado sobre o item antes do preview abrir", hoverPreviewDelay))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
