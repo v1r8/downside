@@ -222,6 +222,23 @@ final class PanelController: ObservableObject {
         }
     }
 
+    /// Cria UMA pilha com todos os itens de um drop em lote (arrastar
+    /// vários arquivos de uma vez nunca deve dividir o grupo).
+    func createStack(with urls: [URL]) {
+        var unique: [URL] = []
+        for url in urls where !unique.contains(url) {
+            unique.append(url)
+        }
+        guard !unique.isEmpty else { return }
+        if stacks.count < Self.maxStacks {
+            stacks.append(FileStack(urls: unique))
+        } else if let last = stacks.indices.last {
+            for url in unique where !stacks[last].urls.contains(url) {
+                stacks[last].urls.append(url)
+            }
+        }
+    }
+
     func removeFromStack(_ id: UUID, url: URL) {
         guard let index = stacks.firstIndex(where: { $0.id == id }) else { return }
         stacks[index].urls.removeAll { $0 == url }

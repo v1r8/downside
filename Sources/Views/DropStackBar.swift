@@ -511,8 +511,10 @@ private struct NewStackTarget: View {
                 onExited: { targeted = false },
                 onPerform: { providers in
                     targeted = false
-                    return StackDropHandler.accept(providers) { url in
-                        panel.addToStack(nil, url: url)
+                    return StackDropHandler.acceptBatch(providers) { urls in
+                        Task { @MainActor in
+                            AppState.shared.panelController.createStack(with: urls)
+                        }
                     }
                 }
             )
@@ -991,6 +993,50 @@ struct StackDropDelegate: DropDelegate {
 enum StackDropHandler {
     static let acceptedTypes: [UTType] = [.fileURL, .image, .url, .utf8PlainText]
 
+    /// Resolve TODOS os providers e entrega o lote completo de uma vez
+    /// — usado pelos alvos que criam pilha nova (vários arquivos num
+    /// arrasto formam UMA pilha, nunca duas).
+    static func acceptBatch(_ providers: [NSItemProvider], complete: @escaping ([URL]) -> Void) -> Bool {
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "downside.batch")
+        var urls: [URL] = []
+        var accepted = false
+
+        func collect(_ url: URL?) {
+            if let url {
+                queue.sync { urls.append(url) }
+            }
+            group.leave()
+        }
+
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                accepted = true
+                group.enter()
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { data, _ in
+                    collect(urlFrom(data))
+                }
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                accepted = true
+                group.enter()
+                saveImage(provider) { collect($0) }
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+                accepted = true
+                group.enter()
+                resolveWebURL(provider) { collect($0) }
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier) {
+                accepted = true
+                group.enter()
+                saveText(provider) { collect($0) }
+            }
+        }
+
+        group.notify(queue: .main) {
+            complete(queue.sync { urls })
+        }
+        return accepted
+    }
+
     static func accept(_ providers: [NSItemProvider], add: @escaping (URL) -> Void) -> Bool {
         var accepted = false
         for provider in providers {
@@ -1022,14 +1068,22 @@ enum StackDropHandler {
     }
 
     private static func saveImage(_ provider: NSItemProvider, add: @escaping (URL) -> Void) {
+        saveImage(provider) { url in
+            if let url {
+                Task { @MainActor in add(url) }
+            }
+        }
+    }
+
+    private static func saveImage(_ provider: NSItemProvider, done: @escaping (URL?) -> Void) {
         let identifier = provider.registeredTypeIdentifiers.first {
             UTType($0)?.conforms(to: .image) == true
         }
-        guard let identifier else { return }
+        guard let identifier else { return done(nil) }
         let ext = UTType(identifier)?.preferredFilenameExtension ?? "png"
 
         provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
-            guard var data else { return }
+            guard var data else { return done(nil) }
             var finalExt = ext
             if finalExt == "tiff" || finalExt == "tif",
                let rep = NSBitmapImageRep(data: data),
@@ -1040,37 +1094,58 @@ enum StackDropHandler {
             let destination = uniqueDestination(name: "Imagem \(timestamp())", ext: finalExt)
             do {
                 try data.write(to: destination)
-                Task { @MainActor in add(destination) }
-            } catch {}
+                done(destination)
+            } catch {
+                done(nil)
+            }
         }
     }
 
     private static func resolveWebURL(_ provider: NSItemProvider, add: @escaping (URL) -> Void) {
-        provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { data, _ in
-            guard let url = urlFrom(data) else { return }
-            if url.isFileURL {
+        resolveWebURL(provider) { url in
+            if let url {
                 Task { @MainActor in add(url) }
-                return
+            }
+        }
+    }
+
+    private static func resolveWebURL(_ provider: NSItemProvider, done: @escaping (URL?) -> Void) {
+        provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { data, _ in
+            guard let url = urlFrom(data) else { return done(nil) }
+            if url.isFileURL {
+                return done(url)
             }
             Task {
-                guard let (temp, response) = try? await URLSession.shared.download(from: url) else { return }
+                guard let (temp, response) = try? await URLSession.shared.download(from: url) else {
+                    return done(nil)
+                }
                 var name = response.suggestedFilename ?? url.lastPathComponent
                 if name.isEmpty || name == "/" { name = "Download \(timestamp())" }
                 let destination = uniqueDestination(filename: name)
                 try? FileManager.default.moveItem(at: temp, to: destination)
-                await MainActor.run { add(destination) }
+                done(destination)
             }
         }
     }
 
     private static func saveText(_ provider: NSItemProvider, add: @escaping (URL) -> Void) {
+        saveText(provider) { url in
+            if let url {
+                Task { @MainActor in add(url) }
+            }
+        }
+    }
+
+    private static func saveText(_ provider: NSItemProvider, done: @escaping (URL?) -> Void) {
         provider.loadDataRepresentation(forTypeIdentifier: UTType.utf8PlainText.identifier) { data, _ in
-            guard let data, !data.isEmpty else { return }
+            guard let data, !data.isEmpty else { return done(nil) }
             let destination = uniqueDestination(name: "Texto \(timestamp())", ext: "txt")
             do {
                 try data.write(to: destination)
-                Task { @MainActor in add(destination) }
-            } catch {}
+                done(destination)
+            } catch {
+                done(nil)
+            }
         }
     }
 

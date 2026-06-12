@@ -273,6 +273,9 @@ struct HistoryOverlay: View {
                     .frame(width: size * scale, height: size * scale)
                     .padding(.leading, CGFloat(index) * size * 0.25 * scale)
                     .rotationEffect(.degrees(Double(index) * 3 - 3))
+                    // Profundidade explícita: sem isto a carta holográfica
+                    // sempre ficava à frente, ignorando a configuração.
+                    .zIndex(Double(3 - index))
             }
             if entry.hadBulkAction, Prefs.bulkBadgeStyle == 1 {
                 HoloCardBadge(
