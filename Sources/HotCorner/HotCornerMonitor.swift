@@ -64,11 +64,24 @@ final class HotCornerMonitor {
         var active: HotCorner?
         if dragging {
             let radius = Prefs.dragOpenRadius
-            active = corners.first { corner in
-                let point = corner.point(in: frame)
-                let dx = mouse.x - point.x
-                let dy = mouse.y - point.y
-                return (dx * dx + dy * dy).squareRoot() <= radius
+            // Posição fixa escolhida pelo usuário: chegar perto DELA
+            // durante um arrasto abre o painel ali, mesmo fechado.
+            if let rect = Self.savedPanelRect() {
+                let dx = max(rect.minX - mouse.x, 0, mouse.x - rect.maxX)
+                let dy = max(rect.minY - mouse.y, 0, mouse.y - rect.maxY)
+                if (dx * dx + dy * dy).squareRoot() <= radius {
+                    active = mouse.x < frame.midX
+                        ? (mouse.y < frame.midY ? .bottomLeft : .topLeft)
+                        : (mouse.y < frame.midY ? .bottomRight : .topRight)
+                }
+            }
+            if active == nil {
+                active = corners.first { corner in
+                    let point = corner.point(in: frame)
+                    let dx = mouse.x - point.x
+                    let dy = mouse.y - point.y
+                    return (dx * dx + dy * dy).squareRoot() <= radius
+                }
             }
             if active == nil {
                 // Laterais ignoram a faixa próxima dos cantos, para não
@@ -111,5 +124,13 @@ final class HotCornerMonitor {
             dwellCorner = nil
             armed = true
         }
+    }
+
+    /// Retângulo aproximado do painel na posição fixa escolhida.
+    private static func savedPanelRect() -> NSRect? {
+        guard let origin = Prefs.panelOrigin else { return nil }
+        let size = Prefs.savedPanelSize(for: Prefs.viewMode)
+            ?? NSSize(width: 560, height: 420)
+        return NSRect(origin: origin, size: size)
     }
 }

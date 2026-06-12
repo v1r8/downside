@@ -25,6 +25,8 @@ struct HistoryOverlay: View {
     /// Deck de cartas do fichário: os ícones voam entre o leque da
     /// ficha e as linhas do conteúdo expandido (como nas pilhas).
     @Namespace private var deck
+    /// Debounce: cliques frenéticos não empilham transações.
+    @State private var lastToggle = Date.distantPast
 
     /// Organizações do fichário: lista + 5 alternativas.
     enum HistoryLayout: Int, CaseIterable {
@@ -237,7 +239,6 @@ struct HistoryOverlay: View {
             return true
         }
         .animation(.easeOut(duration: 0.15), value: listDropTargeted)
-        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: expandedEntry)
         .animation(.spring(response: 0.3, dampingFraction: 0.82), value: selection)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: layoutRaw)
     }
@@ -341,7 +342,10 @@ struct HistoryOverlay: View {
             if isExpanded {
                 Divider().opacity(0.3)
                 expandedContent(entry)
-                    .transition(.opacity)
+                    .transition(.asymmetric(
+                        insertion: .opacity,
+                        removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
+                    ))
             }
         }
         .background(
@@ -404,6 +408,23 @@ struct HistoryOverlay: View {
             }
         }
         .frame(width: size * 1.7 * scale, alignment: .leading)
+    }
+
+    /// Expande/recolhe uma ficha em UMA transação explícita — é ela
+    /// que conduz o voo das cartas (matched geometry), exatamente como
+    /// nas pilhas provisórias.
+    private func toggleExpand(_ id: UUID) {
+        guard Date().timeIntervalSince(lastToggle) > 0.18 else { return }
+        lastToggle = Date()
+        if expandedEntry == id {
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+                expandedEntry = nil
+            }
+        } else {
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
+                expandedEntry = id
+            }
+        }
     }
 
     /// Arquiva o que foi solto sobre a lista do fichário: pilha ativa
@@ -486,10 +507,10 @@ struct HistoryOverlay: View {
                 if modifiers.contains(.command) {
                     if isSelected { selection.remove(entry.id) } else { selection.insert(entry.id) }
                 } else {
-                    expandedEntry = isExpanded ? nil : entry.id
+                    toggleExpand(entry.id)
                 }
             },
-            onDoubleClick: { expandedEntry = isExpanded ? nil : entry.id },
+            onDoubleClick: { toggleExpand(entry.id) },
             dragURLs: { entry.urls },
             menu: { cardMenu(entry) },
             onHover: { hovering, _ in
@@ -532,7 +553,10 @@ struct HistoryOverlay: View {
             if isExpanded {
                 Divider().opacity(0.3)
                 expandedContent(entry)
-                    .transition(.opacity)
+                    .transition(.asymmetric(
+                        insertion: .opacity,
+                        removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
+                    ))
             }
         }
         .background(
@@ -624,7 +648,7 @@ struct HistoryOverlay: View {
                 entryTitle(entry, size: 11.5)
                 Spacer()
                 Button {
-                    expandedEntry = nil
+                    toggleExpand(entry.id)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12 * scale))
@@ -683,10 +707,10 @@ struct HistoryOverlay: View {
                         if modifiers.contains(.command) {
                             if isSelected { selection.remove(entry.id) } else { selection.insert(entry.id) }
                         } else {
-                            expandedEntry = isExpanded ? nil : entry.id
+                            toggleExpand(entry.id)
                         }
                     },
-                    onDoubleClick: { expandedEntry = isExpanded ? nil : entry.id },
+                    onDoubleClick: { toggleExpand(entry.id) },
                     // Arrastar a ficha de volta: solte nos alvos das
                     // pilhas provisórias para restaurá-la.
                     dragURLs: { entry.urls },

@@ -32,10 +32,13 @@ enum SmartNamer {
         Sugira um nome ESPECÍFICO e claro (3 a 8 palavras, em português, \
         sem extensão, sem aspas, sem barras) que identifique este \
         documento pelo conteúdo real, como uma pessoa o descreveria numa \
-        frase curta. CITE nomes próprios presentes no conteúdo — empresa, \
-        programa, pessoas, projeto, produto. NUNCA use genéricos como \
-        "relatório financeiro" ou "link da internet".\(linkHint) Responda \
-        APENAS com o nome:
+        frase curta. Baseie-se SOMENTE nas evidências fornecidas abaixo — \
+        NUNCA invente fatos, nomes ou temas que não estejam nelas. CITE \
+        nomes próprios presentes no conteúdo — empresa, programa, \
+        pessoas, projeto, produto. NUNCA use genéricos como "relatório \
+        financeiro" ou "link da internet".\(linkHint) Se as evidências \
+        não deixarem claro do que se trata, responda exatamente \
+        INDEFINIDO. Responda APENAS com o nome:
 
         \(context)
         """
@@ -51,6 +54,9 @@ enum SmartNamer {
             .replacingOccurrences(of: "/", with: " ")
             .replacingOccurrences(of: ":", with: " ")
         guard name.count > 2 else { return nil }
+        // A IA admitiu não saber: mantém o nome original em vez de
+        // inventar (anti-alucinação, comum em capturas de tela).
+        guard !name.uppercased().contains("INDEFINIDO") else { return nil }
         return String(name.prefix(64))
     }
 }

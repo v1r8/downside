@@ -116,11 +116,14 @@ final class PanelController: ObservableObject {
             showDimmer(on: screen)
         }
 
-        // Posição escolhida pelo usuário (grade 3×3) tem prioridade
-        // sobre a ancoragem pelo canto que disparou.
+        // Prioridade de posição: lugar EXATO escolhido pelo usuário
+        // (arrasto pela borda/alça) > grade 3×3 antiga > canto que
+        // disparou. O painel abre SEMPRE no mesmo lugar.
         let panelSize = size(for: mode)
         let frame: NSRect
-        if let anchor = Prefs.panelAnchor {
+        if let origin = Prefs.panelOrigin {
+            frame = pinnedFrame(origin: origin, size: panelSize, fallback: screen)
+        } else if let anchor = Prefs.panelAnchor {
             frame = anchoredFrame(col: anchor.col, row: anchor.row, size: panelSize, screen: screen)
         } else {
             frame = targetFrame(size: panelSize, corner: corner, screen: screen)
@@ -204,7 +207,13 @@ final class PanelController: ObservableObject {
             hideDimmer()
         }
 
-        let frame = targetFrame(size: size(for: mode), corner: lastCorner, screen: screen)
+        let panelSize = size(for: mode)
+        let frame: NSRect
+        if let origin = Prefs.panelOrigin {
+            frame = pinnedFrame(origin: origin, size: panelSize, fallback: screen)
+        } else {
+            frame = targetFrame(size: panelSize, corner: lastCorner, screen: screen)
+        }
         // Compara apenas o tamanho: depois de um redimensionamento manual
         // o painel pode estar em outra posição, e não deve ser "puxado"
         // de volta ao canto enquanto está aberto.
@@ -449,37 +458,28 @@ final class PanelController: ObservableObject {
         )
     }
 
-    /// Fim do arrasto pela alça: encaixa na célula mais próxima da
-    /// grade e memoriza a escolha.
+    /// Fim do arrasto (alça ou borda): a posição EXATA onde o painel
+    /// foi solto vira o lugar padrão — ele passa a abrir sempre ali, e
+    /// o raio de ativação durante arrastos também respeita esse lugar.
     func panelDragEnded() {
-        guard let panel,
-              let screen = panel.screen ?? lastScreen ?? NSScreen.main
-        else { return }
-        lastScreen = screen
+        guard let panel else { return }
+        lastScreen = panel.screen ?? lastScreen
+        Prefs.setPanelOrigin(panel.frame.origin)
+        Prefs.clearPanelAnchor()
+    }
 
-        let size = panel.frame.size
-        var best = (col: 0, row: 0)
-        var bestDistance = CGFloat.greatestFiniteMagnitude
-        for col in 0..<3 {
-            for row in 0..<3 {
-                let candidate = anchoredFrame(col: col, row: row, size: size, screen: screen)
-                let dx = candidate.minX - panel.frame.minX
-                let dy = candidate.minY - panel.frame.minY
-                let distance = (dx * dx + dy * dy).squareRoot()
-                if distance < bestDistance {
-                    bestDistance = distance
-                    best = (col, row)
-                }
-            }
-        }
-
-        Prefs.setPanelAnchor(col: best.col, row: best.row)
-        let target = anchoredFrame(col: best.col, row: best.row, size: size, screen: screen)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrame(target, display: true)
-        }
+    /// Posição fixa escolhida: usa a tela onde ela vive (ou a do
+    /// gatilho como reserva) e garante o painel inteiro visível.
+    private func pinnedFrame(origin: NSPoint, size: NSSize, fallback: NSScreen) -> NSRect {
+        let home = NSScreen.screens.first {
+            $0.frame.contains(NSPoint(x: origin.x + size.width / 2, y: origin.y + size.height / 2))
+        } ?? NSScreen.screens.first { $0.frame.contains(origin) } ?? fallback
+        let area = home.visibleFrame
+        let width = min(size.width, area.width)
+        let height = min(size.height, area.height)
+        let x = min(max(origin.x, area.minX), area.maxX - width)
+        let y = min(max(origin.y, area.minY), area.maxY - height)
+        return NSRect(x: x, y: y, width: width, height: height)
     }
 
     private func targetFrame(size: NSSize, corner: HotCorner, screen: NSScreen) -> NSRect {

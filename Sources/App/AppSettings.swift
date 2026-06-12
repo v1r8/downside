@@ -164,6 +164,8 @@ enum PrefKey {
     static let bulkAIEngine = "bulkAIEngine"
     static let summaryDepth = "summaryDepth"
     static let keywordCount = "keywordCount"
+    static let timelineHeaderScale = "timelineHeaderScale"
+    static let timelineGap = "timelineGap"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -451,6 +453,18 @@ enum Prefs {
         return NSSize(width: w > 200 ? w : 560, height: h > 160 ? h : 420)
     }
 
+    /// Tamanho dos cabeçalhos ("Hoje", "Ontem"…) da linha do tempo.
+    static var timelineHeaderScale: CGFloat {
+        let value = UserDefaults.standard.double(forKey: PrefKey.timelineHeaderScale)
+        return (0.9...1.9).contains(value) ? CGFloat(value) : 1.25
+    }
+
+    /// Respiro entre os grupos de dias da linha do tempo.
+    static var timelineGap: CGFloat {
+        let value = UserDefaults.standard.double(forKey: PrefKey.timelineGap)
+        return (4...32).contains(value) ? CGFloat(value) : 14
+    }
+
     /// Posição do painel na grade 3×3 da tela (snap proporcional),
     /// escolhida pelo usuário ao arrastar pela alça.
     static var panelAnchor: (col: Int, row: Int)? {
@@ -469,6 +483,26 @@ enum Prefs {
     static func clearPanelAnchor() {
         UserDefaults.standard.removeObject(forKey: "panelAnchor.col")
         UserDefaults.standard.removeObject(forKey: "panelAnchor.row")
+    }
+
+    /// Posição EXATA escolhida pelo usuário arrastando o painel pela
+    /// borda — vira o lugar padrão de abertura, sempre.
+    static var panelOrigin: NSPoint? {
+        guard UserDefaults.standard.object(forKey: "panelOrigin.x") != nil else { return nil }
+        return NSPoint(
+            x: UserDefaults.standard.double(forKey: "panelOrigin.x"),
+            y: UserDefaults.standard.double(forKey: "panelOrigin.y")
+        )
+    }
+
+    static func setPanelOrigin(_ point: NSPoint) {
+        UserDefaults.standard.set(Double(point.x), forKey: "panelOrigin.x")
+        UserDefaults.standard.set(Double(point.y), forKey: "panelOrigin.y")
+    }
+
+    static func clearPanelOrigin() {
+        UserDefaults.standard.removeObject(forKey: "panelOrigin.x")
+        UserDefaults.standard.removeObject(forKey: "panelOrigin.y")
     }
 
     /// Tamanho que o usuário deu ao painel arrastando pelas bordas,

@@ -63,12 +63,36 @@ enum TitlePrompt {
             return "\(url.lastPathComponent) (PDF): \(condense(content, limit: 1600))"
         }
         if imageExtensions.contains(ext) {
+            // Capturas de tela são quase sempre TEXTO: o OCR é a
+            // evidência principal; a classificação visual complementa.
+            var parts: [String] = []
+            let ocr = await imageText(url)
+            if ocr.count > 8 {
+                parts.append("texto na imagem: \(String(ocr.prefix(600)))")
+            }
             let labels = await imageLabels(url)
             if !labels.isEmpty {
-                return "\(url.lastPathComponent) (imagem mostra): \(labels.joined(separator: ", "))"
+                parts.append("a imagem mostra: \(labels.joined(separator: ", "))")
             }
+            guard !parts.isEmpty else { return nil }
+            return "\(url.lastPathComponent) (imagem): \(parts.joined(separator: " — "))"
         }
         return nil
+    }
+
+    /// OCR local (Vision) — o texto visível da imagem.
+    private static func imageText(_ url: URL) async -> String {
+        await Task.detached(priority: .utility) {
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.recognitionLanguages = ["pt-BR", "en-US"]
+            request.usesLanguageCorrection = true
+            let handler = VNImageRequestHandler(url: url)
+            try? handler.perform([request])
+            return (request.results ?? [])
+                .compactMap { $0.topCandidates(1).first?.string }
+                .joined(separator: " ")
+        }.value
     }
 
     /// Colapsa espaços/quebras para caber mais conteúdo útil no prompt.

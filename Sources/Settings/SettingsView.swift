@@ -66,8 +66,12 @@ private struct GeneralSettingsTab: View {
             LabeledContent("Posição do painel") {
                 Button("Restaurar padrão (canto que abriu)") {
                     Prefs.clearPanelAnchor()
+                    Prefs.clearPanelOrigin()
                 }
             }
+            Text("Arraste o painel pela borda (ou pela alça ≡) para escolher um lugar fixo — ele passa a abrir sempre ali.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
     }
@@ -181,6 +185,8 @@ private struct DisplaySettingsTab: View {
     @AppStorage(PrefKey.clipboardStyle) private var clipboardStyle = 2
     @AppStorage(PrefKey.clipboardMarkIntensity) private var clipMarkIntensity = 1.0
     @AppStorage(PrefKey.clipboardBarWidth) private var clipBarWidth = 2.5
+    @AppStorage(PrefKey.timelineHeaderScale) private var timelineHeaderScale = 1.25
+    @AppStorage(PrefKey.timelineGap) private var timelineGap = 14.0
     @ObservedObject private var themeStore = ThemeStore.shared
 
     var body: some View {
@@ -249,6 +255,25 @@ private struct DisplaySettingsTab: View {
                         Text("Intensidade")
                     }
                     Text("Intensidade dos outputs: \(Int(outputIntensity * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Linha do tempo") {
+                VStack(alignment: .leading) {
+                    Slider(value: $timelineHeaderScale, in: 0.9...1.9) {
+                        Text("Tamanho dos nomes (Hoje, Ontem…)")
+                    }
+                    Text("Cabeçalhos em \(Int(timelineHeaderScale * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading) {
+                    Slider(value: $timelineGap, in: 4...32) {
+                        Text("Respiro entre os dias")
+                    }
+                    Text("\(Int(timelineGap)) px entre os grupos")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

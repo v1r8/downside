@@ -34,6 +34,8 @@ struct FolderPeekView: View {
     @State private var confirmClean = false
     @State private var cleaning: [(url: URL, from: CGPoint)]?
     @State private var historyDropTargeted = false
+    /// Seções de busca expandidas além dos primeiros resultados.
+    @State private var searchShowAll: Set<String> = []
 
     @AppStorage(PrefKey.clipboardTimeline) private var clipboardTimeline = false
     @AppStorage(PrefKey.showDragHandle) private var showDragHandle = true
@@ -67,10 +69,22 @@ struct FolderPeekView: View {
         case 9: return .identity
         default:
             return .modifier(
-                active: RevealEffectModifier(progress: 0, style: style, center: revealCenter),
-                identity: RevealEffectModifier(progress: 1, style: style, center: revealCenter)
+                active: RevealEffectModifier(
+                    progress: 0, style: style,
+                    center: revealCenter, startRadius: revealStartRadius
+                ),
+                identity: RevealEffectModifier(
+                    progress: 1, style: style,
+                    center: revealCenter, startRadius: revealStartRadius
+                )
             )
         }
+    }
+
+    /// A fronteira nasce do TAMANHO da bolha (bordas do botão), não de
+    /// um ponto no centro do ícone.
+    private var revealStartRadius: CGFloat {
+        bubbleFrame == .zero ? 14 * scale : bubbleFrame.width / 2 + 1
     }
 
     /// Centro da expansão: a bolha do fichário, medida de verdade
@@ -87,6 +101,31 @@ struct FolderPeekView: View {
 
     private var revealAnimation: Animation {
         .easeInOut(duration: Prefs.ficharioRevealSpeed)
+    }
+
+    /// Quatro faixas finas junto às bordas (deixando os ~4 px externos
+    /// livres para o redimensionamento do sistema): arrastar move o
+    /// painel inteiro e memoriza a posição como padrão.
+    private var borderDragStrips: some View {
+        GeometryReader { proxy in
+            ZStack {
+                dragStrip(width: proxy.size.width - 28, height: 6)
+                    .position(x: proxy.size.width / 2, y: 7)
+                dragStrip(width: proxy.size.width - 28, height: 6)
+                    .position(x: proxy.size.width / 2, y: proxy.size.height - 7)
+                dragStrip(width: 6, height: proxy.size.height - 28)
+                    .position(x: 7, y: proxy.size.height / 2)
+                dragStrip(width: 6, height: proxy.size.height - 28)
+                    .position(x: proxy.size.width - 7, y: proxy.size.height / 2)
+            }
+        }
+    }
+
+    private func dragStrip(width: CGFloat, height: CGFloat) -> some View {
+        Color.clear
+            .frame(width: max(0, width), height: max(0, height))
+            .contentShape(Rectangle())
+            .overlay(WindowDragHandle { panel.panelDragEnded() })
     }
 
     /// Lastro opaco do fichário: uma camada de material que o destaca
@@ -163,17 +202,46 @@ struct FolderPeekView: View {
         return Array(groups.prefix(12))
     }
 
+    /// Resultados de busca: um pouco de cada lugar (linha do tempo,
+    /// pilhas provisórias e fichário), com cabeçalhos claros de ONDE
+    /// cada doc está e botão para expandir além dos primeiros.
     @ViewBuilder
-    private var searchExtraSections: some View {
+    private var searchResultsLayout: some View {
+        if !displayedItems.isEmpty {
+            searchSectionHeader(
+                "Na linha do tempo", icon: "clock",
+                count: displayedItems.count, first: true
+            )
+            ForEach(limitedItems(displayedItems, section: "pasta", limit: 8)) { item in
+                listRow(item)
+            }
+            showAllButton(section: "pasta", total: displayedItems.count, limit: 8)
+        }
+
         if !stackHits.isEmpty {
-            searchSectionHeader("Nas pilhas", icon: "square.stack.3d.up")
-            ForEach(stackHits, id: \.self) { url in
+            searchSectionHeader(
+                "Nas pilhas provisórias", icon: "square.stack.3d.up",
+                count: stackHits.count, first: displayedItems.isEmpty
+            )
+            ForEach(
+                searchShowAll.contains("pilhas") ? stackHits : Array(stackHits.prefix(5)),
+                id: \.self
+            ) { url in
                 searchHitRow(url, context: nil)
             }
+            showAllButton(section: "pilhas", total: stackHits.count, limit: 5)
         }
+
         if !archiveGroups.isEmpty {
-            searchSectionHeader("No fichário", icon: "book")
-            ForEach(archiveGroups, id: \.entry.id) { group in
+            let groups = searchShowAll.contains("fichario")
+                ? archiveGroups
+                : Array(archiveGroups.prefix(4))
+            searchSectionHeader(
+                "No fichário", icon: "book",
+                count: archiveGroups.reduce(0) { $0 + $1.urls.count },
+                first: displayedItems.isEmpty && stackHits.isEmpty
+            )
+            ForEach(groups, id: \.entry.id) { group in
                 // Pilha-mãe primeiro; os docs aparecem subordinados.
                 HStack(spacing: 5 * scale) {
                     Image(systemName: "square.stack.3d.up.fill")
@@ -192,19 +260,71 @@ struct FolderPeekView: View {
                         .padding(.leading, 16 * scale)
                 }
             }
+            showAllButton(section: "fichario", total: archiveGroups.count, limit: 4)
         }
     }
 
-    private func searchSectionHeader(_ title: String, icon: String) -> some View {
-        HStack(spacing: 5 * scale) {
-            Image(systemName: icon)
-            Text(title)
+    private func limitedItems(_ items: [FileItem], section: String, limit: Int) -> [FileItem] {
+        searchShowAll.contains(section) ? items : Array(items.prefix(limit))
+    }
+
+    /// Cabeçalho de seção da busca: ícone + nome do LUGAR + contagem,
+    /// com separação generosa entre as seções.
+    private func searchSectionHeader(
+        _ title: String, icon: String, count: Int, first: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5 * scale) {
+            if !first {
+                Divider().opacity(0.4).padding(.top, 14 * scale)
+            }
+            HStack(spacing: 6 * scale) {
+                Image(systemName: icon)
+                    .font(.system(size: 11 * scale, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                Text(title)
+                    .font(.system(size: 11.5 * scale, weight: .bold))
+                Text("\(count)")
+                    .font(.system(size: 10 * scale, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5 * scale)
+                    .padding(.vertical, 1 * scale)
+                    .background(Capsule().fill(Color.primary.opacity(0.07)))
+                Spacer()
+            }
         }
-        .font(.system(size: 10 * scale, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 10 * scale)
-        .padding(.bottom, 3 * scale)
+        .padding(.top, first ? 2 * scale : 0)
+        .padding(.bottom, 4 * scale)
+        .padding(.horizontal, 2 * scale)
+        .minimalShadow(mode == .minimal)
+    }
+
+    @ViewBuilder
+    private func showAllButton(section: String, total: Int, limit: Int) -> some View {
+        if total > limit {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    if searchShowAll.contains(section) {
+                        searchShowAll.remove(section)
+                    } else {
+                        searchShowAll.insert(section)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4 * scale) {
+                    Image(systemName: searchShowAll.contains(section) ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8 * scale, weight: .semibold))
+                    Text(searchShowAll.contains(section)
+                        ? "Mostrar menos"
+                        : "Mostrar todos (\(total))")
+                        .font(.system(size: 10 * scale, weight: .medium))
+                }
+                .foregroundStyle(Theme.accent)
+                .padding(.vertical, 3 * scale)
+                .padding(.horizontal, 4 * scale)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+        }
     }
 
     private func searchHitRow(_ url: URL, context: String?) -> some View {
@@ -259,16 +379,6 @@ struct FolderPeekView: View {
     private var core: some View {
         VStack(spacing: 0) {
             header
-
-            if let query = parsedQuery {
-                Text(query.summary)
-                    .font(.system(size: 10 * scale))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14 * scale)
-                    .padding(.bottom, 4 * scale)
-                    .minimalShadow(mode == .minimal)
-            }
 
             if showStackBar {
                 DropStackBar(scale: scale)
@@ -346,6 +456,9 @@ struct FolderPeekView: View {
                     .transition(.opacity)
             }
         }
+        // Bordas arrastáveis: clicar e segurar perto de qualquer borda
+        // move o painel inteiro; ao soltar, a posição vira o padrão.
+        .overlay(borderDragStrips)
         // Fecha/abre a faixa de pilhas com mola (ex.: última pilha
         // removida pela lixeira ou menu) — o conteúdo reflui suave.
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: showStackBar)
@@ -366,6 +479,7 @@ struct FolderPeekView: View {
         // alcance (pasta, clipboard, pilhas e fichário) — os
         // resultados vão se completando conforme o índice avança.
         .onChange(of: searchText) { _, _ in
+            searchShowAll.removeAll()
             guard parsedQuery?.nameTerms.isEmpty == false else { return }
             var urls = monitor.items.map(\.url)
             urls += clipboard.items.map(\.url)
@@ -521,7 +635,8 @@ struct FolderPeekView: View {
 
     @ViewBuilder
     private var content: some View {
-        if displayedItems.isEmpty {
+        if displayedItems.isEmpty,
+           parsedQuery == nil || (stackHits.isEmpty && archiveGroups.isEmpty) {
             emptyState
         } else {
             ScrollViewReader { scrollProxy in
@@ -532,11 +647,12 @@ struct FolderPeekView: View {
                             // instanciado (e dispara) quando realmente entra
                             // na área visível, ao rolar até o fim.
                             LazyVStack(spacing: 0) {
-                                layout
                                 if parsedQuery != nil {
-                                    searchExtraSections
+                                    searchResultsLayout
+                                } else {
+                                    layout
                                 }
-                                if monitor.isTruncated {
+                                if monitor.isTruncated, parsedQuery == nil {
                                     LoadMoreFooter(scale: scale) {
                                         monitor.increaseLimit()
                                     }
@@ -642,12 +758,8 @@ struct FolderPeekView: View {
             }
         case .timeline:
             LazyVStack(alignment: .leading, spacing: 2) {
-                ForEach(docTimelineGroups, id: \.0) { group in
-                    Text(group.0)
-                        .font(.system(size: 10 * scale, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 8 * scale)
-                        .padding(.horizontal, 4 * scale)
+                ForEach(Array(docTimelineGroups.enumerated()), id: \.element.0) { index, group in
+                    timelineHeader(group.0, first: index == 0)
                     ForEach(group.1) { item in
                         listRow(item)
                     }
@@ -686,6 +798,24 @@ struct FolderPeekView: View {
                 DMGActionButton(url: item.url, scale: scale)
             }
         }
+    }
+
+    /// Separador de dia da linha do tempo: nome maior e respiro
+    /// configuráveis (Configurações → Exibição).
+    private func timelineHeader(_ title: String, first: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4 * scale) {
+            if !first {
+                Divider()
+                    .opacity(0.35)
+                    .padding(.top, Prefs.timelineGap * scale)
+            }
+            Text(title)
+                .font(.system(size: 11 * Prefs.timelineHeaderScale * scale, weight: .bold))
+                .foregroundStyle(.secondary)
+                .padding(.top, first ? 2 * scale : 4 * scale)
+        }
+        .padding(.horizontal, 4 * scale)
+        .padding(.bottom, 3 * scale)
     }
 
     /// Agrupamento por período do modo Linha do tempo.
@@ -1362,6 +1492,7 @@ private struct RevealEffectModifier: ViewModifier, Animatable {
     var progress: CGFloat
     let style: Int
     let center: CGPoint
+    let startRadius: CGFloat
 
     var animatableData: CGFloat {
         get { progress }
@@ -1392,7 +1523,10 @@ private struct RevealEffectModifier: ViewModifier, Animatable {
     }
 
     private func shape(_ p: CGFloat) -> RevealShape {
-        RevealShape(progress: p, center: center, amp: amp, freq: freq, phase: phase)
+        RevealShape(
+            progress: p, center: center, startRadius: startRadius,
+            amp: amp, freq: freq, phase: phase
+        )
     }
 
     func body(content: Content) -> some View {
@@ -1420,12 +1554,12 @@ private struct RevealEffectModifier: ViewModifier, Animatable {
                     .stroke(Theme.tint(0.55 * fade), lineWidth: 1.2)
                 RevealShape(
                     progress: max(0, progress - 0.09), center: center,
-                    amp: 0.02, freq: 13, phase: phase + 1.3
+                    startRadius: startRadius, amp: 0.02, freq: 13, phase: phase + 1.3
                 )
                 .stroke(Theme.tint(0.3 * fade), lineWidth: 1)
                 RevealShape(
                     progress: max(0, progress - 0.18), center: center,
-                    amp: 0.016, freq: 11, phase: phase + 2.6
+                    startRadius: startRadius, amp: 0.016, freq: 11, phase: phase + 2.6
                 )
                 .stroke(Theme.tint(0.16 * fade), lineWidth: 1)
             case 4: // Explosão: onda de choque com halo luminoso.
@@ -1472,6 +1606,7 @@ private struct RevealEffectModifier: ViewModifier, Animatable {
 private struct RevealShape: Shape {
     var progress: CGFloat
     var center: CGPoint
+    var startRadius: CGFloat
     var amp: CGFloat
     var freq: CGFloat
     var phase: CGFloat
@@ -1491,8 +1626,9 @@ private struct RevealShape: Shape {
         ]
         let reach = corners.map { hypot($0.x - c.x, $0.y - c.y) }.max()
             ?? hypot(rect.width, rect.height)
-        // Margem cobre a ondulação para o fim sempre fechar inteiro.
-        let radius = max(1, 12 + progress * (reach + 40 + reach * amp * 1.5))
+        // Nasce nas BORDAS da bolha; a margem cobre a ondulação para
+        // o fim sempre fechar inteiro.
+        let radius = max(1, startRadius + progress * (reach + 40 + reach * amp * 1.5))
 
         guard amp > 0 else {
             return Path(ellipseIn: CGRect(
