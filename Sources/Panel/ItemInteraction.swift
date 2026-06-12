@@ -117,9 +117,16 @@ final class InteractionView: NSView, NSDraggingSource {
     private func beginDrag(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
 
-        // Texto puro (itens de clipboard): cola como texto no destino.
+        // Texto (itens de clipboard): o drag carrega TEXTO PURO e também
+        // a referência do arquivo — campos de texto colam o conteúdo, e
+        // os alvos de pilha/fichário aceitam o arquivo.
         if let dragText, let text = dragText(), !text.isEmpty {
-            let item = NSDraggingItem(pasteboardWriter: text as NSString)
+            let pasteboardItem = NSPasteboardItem()
+            pasteboardItem.setString(text, forType: .string)
+            if let fileURL = dragURLs?().first {
+                pasteboardItem.setString(fileURL.absoluteString, forType: .fileURL)
+            }
+            let item = NSDraggingItem(pasteboardWriter: pasteboardItem)
             let icon = NSImage(
                 systemSymbolName: "text.alignleft",
                 accessibilityDescription: nil

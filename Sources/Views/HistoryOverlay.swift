@@ -145,15 +145,9 @@ struct HistoryOverlay: View {
                             .font(.system(size: 11.5 * scale, weight: .semibold))
                             .lineLimit(1)
                     }
-                    HStack(spacing: 4 * scale) {
-                        Text("\(entry.paths.count) docs · \(entry.date.formatted(date: .abbreviated, time: .shortened))")
-                        if entry.hadBulkAction {
-                            Image(systemName: "sparkles")
-                                .foregroundStyle(Theme.accent)
-                        }
-                    }
-                    .font(.system(size: 9.5 * scale))
-                    .foregroundStyle(.secondary)
+                    Text("\(entry.paths.count) docs · \(entry.date.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.system(size: 9.5 * scale))
+                        .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 4)
             }

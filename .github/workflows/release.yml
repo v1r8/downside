@@ -22,7 +22,9 @@ env:
 
 jobs:
   release:
-    runs-on: macos-15
+    # macOS 26 + Xcode 26: habilita FoundationModels (LLM local) e o
+    # Liquid Glass nativo nos caminhos gated por compiler(>=6.2).
+    runs-on: macos-26
     env:
       SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
     steps:

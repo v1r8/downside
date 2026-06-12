@@ -47,6 +47,10 @@ struct FolderPeekView: View {
         ViewMode(rawValue: viewModeRaw) ?? .grid
     }
 
+    private var showStackBar: Bool {
+        panel.isDraggingFromPanel || panel.externalDragActive || panel.hasStacks
+    }
+
     private var scale: CGFloat {
         let value = CGFloat(uiScaleRaw)
         return (0.8...2.0).contains(value) ? value : 1.0
@@ -207,8 +211,12 @@ struct FolderPeekView: View {
                     .minimalShadow(mode == .minimal)
             }
 
-            if panel.isDraggingFromPanel || panel.externalDragActive || panel.hasStacks {
+            if showStackBar {
                 DropStackBar(scale: scale)
+                    .transition(.asymmetric(
+                        insertion: .opacity,
+                        removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
+                    ))
             }
 
             if mode != .minimal {
@@ -238,6 +246,9 @@ struct FolderPeekView: View {
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             }
         }
+        // Fecha/abre a faixa de pilhas com mola (ex.: última pilha
+        // removida pela lixeira ou menu) — o conteúdo reflui suave.
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: showStackBar)
         .onReceive(NotificationCenter.default.publisher(for: .peekSelectAll)) { _ in
             selection = Set(displayedItems.map(\.url))
         }
@@ -257,15 +268,20 @@ struct FolderPeekView: View {
 
     private var header: some View {
         HStack(spacing: 9 * scale) {
-            // Toggle de itens do clipboard na linha do tempo.
+            // Toggle de itens do clipboard: folha dobrada, comportamento
+            // gêmeo do livrinho do fichário.
             Button {
-                clipboardTimeline.toggle()
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
+                    clipboardTimeline.toggle()
+                }
             } label: {
-                Image(systemName: clipboardTimeline ? "doc.on.clipboard.fill" : "doc.on.clipboard")
+                Image(systemName: clipboardTimeline ? "doc.fill" : "doc")
                     .foregroundStyle(clipboardTimeline ? Theme.accent : Color.primary)
                     .frame(width: 24 * scale, height: 24 * scale)
                     .contentShape(Rectangle())
             }
+            .scaleEffect(clipboardTimeline ? 1.08 : 1)
+            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: clipboardTimeline)
             .help(clipboardTimeline ? "Ocultar itens do clipboard" : "Mostrar itens do clipboard")
 
             // A busca é única (pasta, clipboard, pilhas e fichário).
@@ -318,29 +334,35 @@ struct FolderPeekView: View {
                                 ? Theme.accent
                                 : Color.primary
                         )
-                        .frame(width: 26 * scale, height: 26 * scale)
-                        .contentShape(Circle())
+                        // Durante arrastos a zona de soltar se alarga,
+                        // virando uma pílula — alvo bem maior.
+                        .frame(
+                            width: (panel.isDraggingFromPanel || panel.externalDragActive ? 48 : 26) * scale,
+                            height: 26 * scale
+                        )
+                        .contentShape(Capsule())
                 }
                 .background(
-                    Circle()
+                    Capsule()
                         .fill(Theme.tint(historyDropTargeted ? 0.15 : 0.06))
                         .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
                 )
                 .overlay(
-                    Circle()
+                    Capsule()
                         .strokeBorder(
                             Theme.accent,
                             style: StrokeStyle(lineWidth: 1, dash: [3, 3])
                         )
                         .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
                 )
-                .scaleEffect(
-                    historyDropTargeted ? 1.25
-                        : (panel.isDraggingFromPanel || panel.externalDragActive ? 1.12 : 1)
+                .scaleEffect(historyDropTargeted ? 1.12 : 1)
+                .animation(
+                    .spring(response: 0.28, dampingFraction: 0.72),
+                    value: historyDropTargeted
                 )
                 .animation(
-                    .spring(response: 0.25, dampingFraction: 0.7),
-                    value: historyDropTargeted || panel.isDraggingFromPanel || panel.externalDragActive
+                    .spring(response: 0.28, dampingFraction: 0.72),
+                    value: panel.isDraggingFromPanel || panel.externalDragActive
                 )
                 .onDrop(of: [.fileURL], isTargeted: $historyDropTargeted) { providers in
                     StackDropHandler.collectFileURLs(providers) { urls in

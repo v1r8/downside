@@ -102,3 +102,47 @@ struct GlassCapsule: View {
         }
     }
 }
+
+/// Botão circular mínimo em vidro tingido (estilo do botão de limpeza,
+/// com a cor de destaque das configurações) — só o ícone, sem texto.
+struct GlassIconButton: View {
+    @ObservedObject private var themeStore = ThemeStore.shared
+    let icon: String
+    let scale: CGFloat
+    var tint: Color?
+    var help: String = ""
+    var action: () -> Void
+
+    init(
+        icon: String,
+        scale: CGFloat,
+        tint: Color? = nil,
+        help: String = "",
+        action: @escaping () -> Void
+    ) {
+        self.icon = icon
+        self.scale = scale
+        self.tint = tint
+        self.help = help
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10 * scale, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22 * scale, height: 22 * scale)
+        }
+        .buttonStyle(.borderless)
+        .background(
+            ZStack {
+                Circle().fill(.ultraThinMaterial)
+                Circle().fill(tint ?? Theme.tint(0.65))
+            }
+        )
+        .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+        .help(help)
+    }
+}

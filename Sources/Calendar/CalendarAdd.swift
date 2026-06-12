@@ -143,18 +143,13 @@ struct CalendarAddButton: View {
         Group {
             switch phase {
             case .idle:
-                Button {
+                GlassIconButton(
+                    icon: "calendar.badge.plus",
+                    scale: scale,
+                    help: "Adicionar evento à Agenda"
+                ) {
                     Task { await beginChoosing() }
-                } label: {
-                    Image(systemName: "calendar.badge.plus")
-                        .font(.system(size: 11 * scale, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8 * scale)
-                        .padding(.vertical, 3 * scale)
-                        .background(Capsule().fill(Theme.accent))
                 }
-                .buttonStyle(.borderless)
-                .help("Adicionar evento à Agenda")
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
 
             case .choosing(let calendars):

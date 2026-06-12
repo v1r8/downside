@@ -759,18 +759,19 @@ struct SaveClipboardTextButton: View {
                 }
             }
         } label: {
-            HStack(spacing: 3 * scale) {
-                Image(systemName: saved ? "checkmark" : "arrow.down.doc")
-                    .font(.system(size: 8.5 * scale, weight: .bold))
-                Text(saved ? "Salvo" : "Salvar como .txt")
-                    .font(.system(size: 9.5 * scale, weight: .semibold))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 7 * scale)
-            .padding(.vertical, 3 * scale)
-            .background(Capsule().fill(saved ? Color.green : Theme.accent))
+            Image(systemName: saved ? "checkmark" : "arrow.down.doc")
+                .font(.system(size: 10 * scale, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22 * scale, height: 22 * scale)
         }
         .buttonStyle(.borderless)
+        .background(
+            ZStack {
+                Circle().fill(.ultraThinMaterial)
+                Circle().fill(saved ? Color.green.opacity(0.75) : Theme.tint(0.65))
+            }
+        )
+        .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.8))
         .help("Criar um arquivo .txt na pasta monitorada")
     }
 }

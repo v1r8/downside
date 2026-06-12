@@ -44,9 +44,12 @@ enum ClaudeService {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Título curto e informativo para uma pilha, a partir dos nomes
-    /// dos arquivos (modelo rápido). Sem chave, usa a data.
+    /// Título curto e informativo para uma pilha. Ordem de preferência:
+    /// modelo LOCAL (Apple Intelligence, macOS 26) → Claude → data.
     static func stackTitle(for urls: [URL]) async -> String {
+        if let local = await LocalNamer.title(for: urls) {
+            return local
+        }
         let fallback = "Pilha de \(Date().formatted(date: .abbreviated, time: .shortened))"
         guard hasKey else { return fallback }
         let names = urls.prefix(20).map(\.lastPathComponent).joined(separator: "\n")

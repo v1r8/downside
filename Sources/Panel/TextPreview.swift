@@ -109,25 +109,27 @@ struct TextFilePreview: View {
     @State private var text = ""
     @State private var loaded = false
     @State private var lastSaved = ""
-    @State private var status = ""
-    @State private var searchQuery = ""
     @State private var saveTask: Task<Void, Never>?
+    @AppStorage("textPreviewFontSize") private var fontSize = 12.0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6 * scale) {
+        // Minimalista: só o texto sobre o fundo, com a toolbar suspensa
+        // flutuando por cima. Salvamento automático silencioso.
+        ZStack(alignment: .top) {
+            PlainTextEditor(
+                text: $text,
+                fontSize: CGFloat(fontSize) * scale,
+                controller: controller
+            )
+            .frame(height: 280 * scale * sizeFactor)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
             toolbar
-
-            PlainTextEditor(text: $text, fontSize: 12 * scale, controller: controller)
-                .frame(height: 260 * scale * sizeFactor)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.primary.opacity(0.05))
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            Text(status.isEmpty ? "Salvamento automático · ⌘Z desfaz, ⇧⌘Z refaz" : status)
-                .font(.system(size: 9 * scale))
-                .foregroundStyle(.secondary)
+                .padding(.top, 6 * scale)
         }
         .onAppear(perform: load)
         .onChange(of: text) { _, newValue in
@@ -157,32 +159,17 @@ struct TextFilePreview: View {
 
             toolbarDivider
 
-            HStack(spacing: 3 * scale) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 9 * scale))
-                    .foregroundStyle(.secondary)
-                TextField("Buscar no texto", text: $searchQuery)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 10.5 * scale))
-                    .onSubmit { controller.findNext(searchQuery) }
-                if !searchQuery.isEmpty {
-                    Button {
-                        controller.findNext(searchQuery)
-                    } label: {
-                        Image(systemName: "arrow.down.circle")
-                            .font(.system(size: 10 * scale))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Próxima ocorrência (Return)")
-                }
+            toolbarButton("textformat.size.smaller", help: "Diminuir fonte") {
+                fontSize = max(9, fontSize - 1)
             }
-            .padding(.horizontal, 7 * scale)
-            .padding(.vertical, 3 * scale)
-            .background(Capsule().fill(Color.primary.opacity(0.07)))
+            toolbarButton("textformat.size.larger", help: "Aumentar fonte") {
+                fontSize = min(20, fontSize + 1)
+            }
         }
-        .padding(5 * scale)
+        .padding(.horizontal, 6 * scale)
+        .padding(.vertical, 4 * scale)
         .background(toolbarBackground)
+        .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
     }
 
     private func toolbarButton(
@@ -212,7 +199,7 @@ struct TextFilePreview: View {
     private var toolbarBackground: some View {
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
-            Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 10))
+            Color.clear.glassEffect(.regular, in: Capsule())
         } else {
             legacyToolbarBackground
         }
@@ -222,11 +209,10 @@ struct TextFilePreview: View {
     }
 
     private var legacyToolbarBackground: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        Capsule()
             .fill(.ultraThinMaterial)
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                Capsule().strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
             )
     }
 
@@ -245,15 +231,9 @@ struct TextFilePreview: View {
         saveTask = Task {
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
-            do {
-                try value.write(to: url, atomically: true, encoding: .utf8)
+            if (try? value.write(to: url, atomically: true, encoding: .utf8)) != nil {
                 lastSaved = value
-                status = "Salvo ✓"
-            } catch {
-                status = "Não foi possível salvar"
             }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            if !Task.isCancelled { status = "" }
         }
     }
 }

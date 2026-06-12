@@ -106,24 +106,34 @@ struct DMGActionButton: View {
         Group {
             switch phase {
             case .install:
-                pill("arrow.down.app", "Instalar") {
+                GlassIconButton(
+                    icon: "arrow.down.app",
+                    scale: scale,
+                    help: "Instalar o app em Aplicativos"
+                ) {
                     Task { await install() }
                 }
             case .working:
-                HStack(spacing: 4 * scale) {
-                    ProgressView().controlSize(.small)
-                    Text("Instalando…")
-                        .font(.system(size: 10 * scale))
-                        .foregroundStyle(.secondary)
-                }
+                ProgressView()
+                    .controlSize(.small)
+                    .help("Instalando…")
             case .open(let path):
-                pill("arrow.up.forward.app", "Abrir") {
+                GlassIconButton(
+                    icon: "arrow.up.forward.app",
+                    scale: scale,
+                    help: "Abrir o app instalado"
+                ) {
                     NSWorkspace.shared.open(URL(fileURLWithPath: path))
                 }
             case .failed:
-                Text("Falhou")
-                    .font(.system(size: 10 * scale))
-                    .foregroundStyle(.secondary)
+                GlassIconButton(
+                    icon: "exclamationmark.triangle",
+                    scale: scale,
+                    tint: Color.orange.opacity(0.7),
+                    help: "A instalação falhou — clique para tentar de novo"
+                ) {
+                    Task { await install() }
+                }
             }
         }
         .onAppear {

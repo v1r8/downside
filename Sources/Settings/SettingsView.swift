@@ -463,9 +463,24 @@ private struct PreviewCategorySizeRow: View {
 
 private struct AISettingsTab: View {
     @AppStorage(PrefKey.claudeAPIKey) private var apiKey = ""
+    @AppStorage(PrefKey.stackTitleDetail) private var titleDetail = 1
 
     var body: some View {
         Form {
+            Section("Nomeação de pilhas") {
+                Picker("Detalhamento do título", selection: $titleDetail) {
+                    Text("Só os nomes dos arquivos").tag(1)
+                    Text("Nomes + trechos do conteúdo").tag(2)
+                }
+                LabeledContent("Modelo local") {
+                    Text(LocalNamer.isAvailable
+                        ? "Apple Intelligence disponível ✓ (no aparelho, grátis)"
+                        : "Indisponível — requer macOS 26 com Apple Intelligence; usa Claude/data como alternativa")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+
             SecureField("Chave da API do Claude", text: $apiKey, prompt: Text("sk-ant-…"))
             Text("""
             Opcional. Habilita os recursos de IA: títulos automáticos no \

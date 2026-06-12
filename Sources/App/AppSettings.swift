@@ -142,6 +142,7 @@ enum PrefKey {
     static let cleanButtonEnabled = "cleanButtonEnabled"
     static let clipboardMarkIntensity = "clipboardMarkIntensity"
     static let clipboardBarWidth = "clipboardBarWidth"
+    static let stackTitleDetail = "stackTitleDetail"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -288,6 +289,13 @@ enum Prefs {
     static var clipboardBarWidth: CGFloat {
         let value = UserDefaults.standard.double(forKey: PrefKey.clipboardBarWidth)
         return (2...6).contains(value) ? CGFloat(value) : 2.5
+    }
+
+    /// Detalhamento do título de pilhas: 1 = só nomes; 2 = nomes +
+    /// trechos do conteúdo.
+    static var stackTitleDetail: Int {
+        let value = UserDefaults.standard.integer(forKey: PrefKey.stackTitleDetail)
+        return (1...2).contains(value) ? value : 1
     }
 
     /// Chave da API do Claude para os recursos de IA (opcional).
