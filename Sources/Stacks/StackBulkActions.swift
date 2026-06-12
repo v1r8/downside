@@ -135,10 +135,13 @@ final class BulkActionRunner: ObservableObject {
         var results: [URL] = []
         for link in links.prefix(10) {
             guard let (temp, response) = try? await URLSession.shared.download(from: link) else { continue }
-            var name = response.suggestedFilename ?? link.lastPathComponent
-            if name.isEmpty || name == "/" { name = "Download \(stamp())" }
-            let destination = Prefs.supportDirectory("Pilhas").appendingPathComponent(name)
-            try? FileManager.default.removeItem(at: destination)
+            // Nome sugerido pelo servidor passa por sanitização e nunca
+            // sobrescreve um arquivo existente (recebe sufixo numérico).
+            let name = SafeFileName.sanitize(
+                response.suggestedFilename ?? link.lastPathComponent,
+                fallback: "Download \(stamp())"
+            )
+            let destination = uniqueDestination(filename: name)
             try? FileManager.default.moveItem(at: temp, to: destination)
             results.append(destination)
         }
@@ -229,5 +232,19 @@ final class BulkActionRunner: ObservableObject {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH.mm"
         return formatter.string(from: Date())
+    }
+
+    private func uniqueDestination(filename: String) -> URL {
+        let folder = Prefs.supportDirectory("Pilhas")
+        var candidate = folder.appendingPathComponent(filename)
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var counter = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            let numbered = ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)"
+            candidate = folder.appendingPathComponent(numbered)
+            counter += 1
+        }
+        return candidate
     }
 }

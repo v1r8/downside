@@ -19,6 +19,8 @@ struct SettingsView: View {
                 .tabItem { Label("Preview", systemImage: "eye") }
             AISettingsTab()
                 .tabItem { Label("IA", systemImage: "sparkles") }
+            SecuritySettingsTab()
+                .tabItem { Label("Segurança", systemImage: "lock.shield") }
             UpdateSettingsTab()
                 .tabItem { Label("Atualizações", systemImage: "arrow.triangle.2.circlepath") }
         }
@@ -488,7 +490,7 @@ private struct PreviewCategorySizeRow: View {
 // MARK: - IA
 
 private struct AISettingsTab: View {
-    @AppStorage(PrefKey.claudeAPIKey) private var apiKey = ""
+    @State private var apiKey = Prefs.claudeAPIKey ?? ""
     @AppStorage(PrefKey.stackTitleDetail) private var titleDetail = 1
     @AppStorage(PrefKey.ollamaModel) private var ollamaModel = "llama3.2:3b"
 
@@ -545,12 +547,15 @@ private struct AISettingsTab: View {
             .task { await refreshStatus() }
 
             SecureField("Chave da API do Claude", text: $apiKey, prompt: Text("sk-ant-…"))
+                .onChange(of: apiKey) { _, value in
+                    APIKeyVault.set(value)
+                }
             Text("""
             Opcional. Habilita os recursos de IA: títulos automáticos no \
             fichário e as ações em massa "Resumir" e "Palavras-chave" nas \
             pilhas. Crie uma chave em console.anthropic.com — o uso é \
-            cobrado pela Anthropic na sua conta. A chave fica salva apenas \
-            neste Mac.
+            cobrado pela Anthropic na sua conta. A chave fica guardada \
+            no Keychain do macOS, cifrada pelo sistema.
             """)
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -591,6 +596,94 @@ private struct AISettingsTab: View {
                 pullStatus = nil
             }
         }
+    }
+}
+
+// MARK: - Segurança
+
+private struct SecuritySettingsTab: View {
+    @AppStorage(PrefKey.clipboardSkipConcealed) private var skipConcealed = true
+    @AppStorage(PrefKey.clipboardSkipTransient) private var skipTransient = true
+    @AppStorage(PrefKey.clipboardSkipSecretLike) private var skipSecretLike = true
+    @AppStorage(PrefKey.clipboardRetentionHours) private var retentionHours = 168.0
+    @State private var clearedFlash = false
+
+    var body: some View {
+        Form {
+            Section("Clipboard") {
+                Toggle("Ignorar cópias de gerenciadores de senhas", isOn: $skipConcealed)
+                Text("""
+                1Password, Bitwarden e afins marcam o que copiam como \
+                confidencial — com isso ligado, o Downside nunca guarda \
+                esse conteúdo.
+                """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Toggle("Ignorar conteúdo transitório/automático", isOn: $skipTransient)
+                Text("Cópias marcadas pelos apps como descartáveis ou geradas automaticamente não entram na linha do tempo.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Não guardar textos que parecem senhas ou chaves", isOn: $skipSecretLike)
+                Text("""
+                Detecção 100% local: tokens conhecidos (sk-…, ghp_…, JWT…) \
+                e sequências longas sem espaços misturando maiúsculas, \
+                minúsculas e números são pulados. Frases e textos comuns \
+                nunca são afetados.
+                """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Section("Histórico do clipboard") {
+                Picker("Apagar automaticamente", selection: $retentionHours) {
+                    Text("Depois de 1 hora").tag(1.0)
+                    Text("Depois de 24 horas").tag(24.0)
+                    Text("Depois de 7 dias").tag(168.0)
+                    Text("Depois de 30 dias").tag(720.0)
+                    Text("Nunca").tag(0.0)
+                }
+                Text("Itens antigos saem da linha do tempo e as cópias guardadas pelo app são apagadas de vez. Seus arquivos originais nunca são tocados.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button(clearedFlash ? "Histórico limpo ✓" : "Limpar histórico do clipboard agora") {
+                    AppState.shared.clipboard.clearAll()
+                    clearedFlash = true
+                    Task {
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        clearedFlash = false
+                    }
+                }
+                .disabled(clearedFlash)
+            }
+
+            Section("Chave da API") {
+                LabeledContent("Armazenamento") {
+                    Text(ClaudeService.hasKey
+                        ? "No Keychain do macOS ✓ (cifrada pelo sistema)"
+                        : "Nenhuma chave configurada")
+                        .foregroundStyle(.secondary)
+                }
+                Text("A chave do Claude vive no Keychain — não fica em nenhum arquivo de preferências e nunca sai deste Mac (só é enviada à API da Anthropic quando você usa os recursos de IA).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Onde seus dados ficam") {
+                Text("""
+                Tudo que o Downside guarda — clipboard, pilhas, fichário e \
+                preferências — fica em Biblioteca → Application Support → \
+                Downside, neste Mac. Nada é publicado nem sincronizado. \
+                Downloads de links usam nomes sanitizados e nunca \
+                sobrescrevem arquivos existentes.
+                """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

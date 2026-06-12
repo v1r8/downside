@@ -1119,8 +1119,10 @@ enum StackDropHandler {
                 guard let (temp, response) = try? await URLSession.shared.download(from: url) else {
                     return done(nil)
                 }
-                var name = response.suggestedFilename ?? url.lastPathComponent
-                if name.isEmpty || name == "/" { name = "Download \(timestamp())" }
+                let name = SafeFileName.sanitize(
+                    response.suggestedFilename ?? url.lastPathComponent,
+                    fallback: "Download \(timestamp())"
+                )
                 let destination = uniqueDestination(filename: name)
                 try? FileManager.default.moveItem(at: temp, to: destination)
                 done(destination)
