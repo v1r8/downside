@@ -103,6 +103,76 @@ struct GlassCapsule: View {
     }
 }
 
+/// Carta holográfica (estilo carta de Pokémon): indica output de bulk
+/// action no deck, com brilho varrendo continuamente.
+struct HoloCardBadge: View {
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.05)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let phase = CGFloat(t.truncatingRemainder(dividingBy: 2.6) / 2.6)
+            RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                .fill(Theme.outputTint(0.9))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    .clear,
+                                    Color.white.opacity(0.75),
+                                    Color.cyan.opacity(0.5),
+                                    Color.purple.opacity(0.45),
+                                    .clear,
+                                ],
+                                startPoint: UnitPoint(x: phase * 2.4 - 1.4, y: phase * 2.4 - 1.4),
+                                endPoint: UnitPoint(x: phase * 2.4 - 0.4, y: phase * 2.4 - 0.4)
+                            )
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.55), lineWidth: 0.8)
+                )
+                .frame(width: width, height: height)
+                .shadow(color: Theme.output.opacity(0.55), radius: 3)
+        }
+    }
+}
+
+/// Efeito mágico no lugar do título enquanto a IA nomeia a ficha.
+struct MagicNamePlaceholder: View {
+    let scale: CGFloat
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.04)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let phase = CGFloat(t.truncatingRemainder(dividingBy: 1.6) / 1.6)
+            HStack(spacing: 4 * scale) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 9 * scale))
+                    .foregroundStyle(Theme.accent)
+                    .opacity(0.45 + 0.55 * abs(sin(t * 3.5)))
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.primary.opacity(0.08),
+                                Theme.tint(0.55),
+                                Color.primary.opacity(0.08),
+                            ],
+                            startPoint: UnitPoint(x: phase * 2.2 - 1.2, y: 0.5),
+                            endPoint: UnitPoint(x: phase * 2.2 - 0.2, y: 0.5)
+                        )
+                    )
+                    .frame(width: 88 * scale, height: 9 * scale)
+            }
+        }
+        .help("Nomeando com IA…")
+    }
+}
+
 /// Botão circular mínimo em vidro tingido (estilo do botão de limpeza,
 /// com a cor de destaque das configurações) — só o ícone, sem texto.
 struct GlassIconButton: View {

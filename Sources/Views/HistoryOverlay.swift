@@ -65,24 +65,12 @@ struct HistoryOverlay: View {
 
     var body: some View {
         VStack(spacing: 6 * scale) {
-            HStack {
-                Picker("Organização", selection: $layoutRaw) {
-                    ForEach(HistoryLayout.allCases, id: \.rawValue) { option in
-                        Image(systemName: option.icon)
-                            .help(option.label)
-                            .tag(option.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-
-                Spacer()
-
-                if !selection.isEmpty {
+            if !selection.isEmpty {
+                HStack {
                     Text("\(selection.count) selecionadas")
                         .font(.system(size: 10.5 * scale))
                         .foregroundStyle(.secondary)
+                    Spacer()
                     Button("Apagar", role: .destructive) {
                         for id in selection { store.delete(id) }
                         selection.removeAll()
@@ -93,9 +81,9 @@ struct HistoryOverlay: View {
                     }
                     .font(.system(size: 10.5 * scale))
                 }
+                .buttonStyle(.borderless)
+                .padding(.horizontal, 2 * scale)
             }
-            .buttonStyle(.borderless)
-            .padding(.horizontal, 2 * scale)
 
             if filtered.isEmpty {
                 VStack(spacing: 6 * scale) {
@@ -260,6 +248,19 @@ struct HistoryOverlay: View {
         )
     }
 
+
+    /// Título da ficha: efeito mágico enquanto a IA nomeia.
+    @ViewBuilder
+    private func entryTitle(_ entry: ArchivedStack, size: CGFloat, lines: Int = 1) -> some View {
+        if store.namingIDs.contains(entry.id) {
+            MagicNamePlaceholder(scale: scale)
+        } else {
+            Text(entry.title.isEmpty ? "Sem título" : entry.title)
+                .font(.system(size: size * scale, weight: .semibold))
+                .lineLimit(lines)
+        }
+    }
+
     // MARK: - Componentes compartilhados
 
     /// Leque de ícones da ficha, com o indicador de bulk action
@@ -274,16 +275,13 @@ struct HistoryOverlay: View {
                     .rotationEffect(.degrees(Double(index) * 3 - 3))
             }
             if entry.hadBulkAction, Prefs.bulkBadgeStyle == 1 {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(Theme.outputTint(0.9))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 2, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.4), lineWidth: 0.8)
-                    )
-                    .frame(width: size * 0.42 * scale, height: size * 0.62 * scale)
-                    .rotationEffect(.degrees(9))
-                    .padding(.leading, size * 0.95 * scale)
-                    .zIndex(10)
+                HoloCardBadge(
+                    width: size * 0.62 * scale,
+                    height: size * 0.9 * scale
+                )
+                .rotationEffect(.degrees(-10))
+                .offset(x: -size * 0.3 * scale)
+                .zIndex(0)
             }
         }
         .frame(width: size * 1.7 * scale, alignment: .leading)
@@ -345,9 +343,7 @@ struct HistoryOverlay: View {
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6 * scale) {
                 bulkStar(entry)
-                Text(entry.title)
-                    .font(.system(size: 11 * scale, weight: .medium))
-                    .lineLimit(1)
+                entryTitle(entry, size: 11)
                 bulkDot(entry)
                 Spacer()
                 Text("\(entry.paths.count)")
@@ -385,9 +381,7 @@ struct HistoryOverlay: View {
                 bulkStar(entry)
                 fan(entry, size: 26)
             }
-            Text(entry.title)
-                .font(.system(size: 10.5 * scale, weight: .semibold))
-                .lineLimit(2)
+            entryTitle(entry, size: 10.5, lines: 2)
                 .multilineTextAlignment(.center)
             HStack(spacing: 4 * scale) {
                 Text("\(entry.paths.count) docs")
@@ -454,9 +448,7 @@ struct HistoryOverlay: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6 * scale) {
                 bulkStar(entry)
-                Text(entry.title)
-                    .font(.system(size: 11.5 * scale, weight: .semibold))
-                    .lineLimit(1)
+                entryTitle(entry, size: 11.5)
                 Spacer()
                 Button {
                     expandedEntry = nil
@@ -499,9 +491,7 @@ struct HistoryOverlay: View {
                                 renamingEntry = nil
                             }
                     } else {
-                        Text(entry.title)
-                            .font(.system(size: 11.5 * scale, weight: .semibold))
-                            .lineLimit(1)
+                        entryTitle(entry, size: 11.5)
                     }
                     HStack(spacing: 4 * scale) {
                         Text("\(entry.paths.count) docs · \(entry.date.formatted(date: .abbreviated, time: .shortened))")
@@ -738,8 +728,7 @@ struct HistoryOverlay: View {
         })
         menu.addItem(ActionMenuItem(title: "Gerar título com IA") {
             Task { @MainActor in
-                let title = await ClaudeService.stackTitle(for: entry.urls)
-                StackHistoryStore.shared.rename(entry.id, to: title)
+                StackHistoryStore.shared.regenerateTitle(entry)
             }
         })
         menu.addItem(.separator())

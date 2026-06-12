@@ -1,21 +1,36 @@
 import Foundation
+import PDFKit
+import Vision
 
 #if compiler(>=6.2)
 import FoundationModels
 #endif
 
-/// Prompt compartilhado de nomeação (Apple Intelligence, Ollama, Claude).
+/// Prompt compartilhado de nomeação (Apple Intelligence, Ollama,
+/// Claude). No detalhamento 2, lê textos, extrai texto de PDFs e
+/// ANALISA imagens localmente (Vision) para descrever o conteúdo.
 enum TitlePrompt {
-    static func build(for urls: [URL]) -> String {
+    static func build(for urls: [URL]) async -> String {
         let names = urls.prefix(15).map(\.lastPathComponent).joined(separator: "\n")
 
         var excerpts = ""
         if Prefs.stackTitleDetail >= 2 {
             let textExtensions: Set<String> = ["txt", "md", "csv", "json", "xml", "log"]
-            for url in urls.prefix(3)
-            where textExtensions.contains(url.pathExtension.lowercased()) {
-                if let content = try? String(contentsOf: url, encoding: .utf8) {
+            let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "gif", "webp", "tiff"]
+
+            for url in urls.prefix(5) {
+                let ext = url.pathExtension.lowercased()
+                if textExtensions.contains(ext),
+                   let content = try? String(contentsOf: url, encoding: .utf8) {
                     excerpts += "\n— \(url.lastPathComponent): \(String(content.prefix(280)))"
+                } else if ext == "pdf",
+                          let content = PDFDocument(url: url)?.string {
+                    excerpts += "\n— \(url.lastPathComponent) (PDF): \(String(content.prefix(280)))"
+                } else if imageExtensions.contains(ext) {
+                    let labels = await imageLabels(url)
+                    if !labels.isEmpty {
+                        excerpts += "\n— \(url.lastPathComponent) (imagem mostra): \(labels.joined(separator: ", "))"
+                    }
                 }
             }
         }
@@ -25,8 +40,21 @@ enum TitlePrompt {
         pontuação final) que descreva o tema comum destes arquivos. \
         Responda APENAS com o título:
 
-        \(names)\(excerpts.isEmpty ? "" : "\n\nTrechos do conteúdo:\(excerpts)")
+        \(names)\(excerpts.isEmpty ? "" : "\n\nConteúdo analisado:\(excerpts)")
         """
+    }
+
+    /// Classificação local da imagem (Vision) — rótulos do que ela mostra.
+    private static func imageLabels(_ url: URL) async -> [String] {
+        await Task.detached(priority: .utility) {
+            let request = VNClassifyImageRequest()
+            let handler = VNImageRequestHandler(url: url)
+            try? handler.perform([request])
+            return (request.results ?? [])
+                .filter { $0.confidence > 0.3 }
+                .prefix(4)
+                .map { $0.identifier.replacingOccurrences(of: "_", with: " ") }
+        }.value
     }
 }
 
@@ -50,7 +78,8 @@ enum LocalNamer {
         guard SystemLanguageModel.default.availability == .available else { return nil }
         do {
             let session = LanguageModelSession()
-            let response = try await session.respond(to: TitlePrompt.build(for: urls))
+            let prompt = await TitlePrompt.build(for: urls)
+            let response = try await session.respond(to: prompt)
             let title = response.content
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\"'."))

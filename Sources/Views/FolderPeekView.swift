@@ -275,14 +275,9 @@ struct FolderPeekView: View {
                     clipboardTimeline.toggle()
                 }
             } label: {
-                ZStack {
-                    Image(systemName: "doc.fill")
-                        .opacity(clipboardTimeline ? 1 : 0)
-                        .foregroundStyle(Color.primary.opacity(0.85))
-                    Image(systemName: "doc")
-                        .foregroundStyle(clipboardTimeline ? Theme.accent : Color.primary)
-                }
-                .font(.system(size: 13 * scale))
+                Image(systemName: clipboardTimeline ? "doc.fill" : "doc")
+                    .foregroundStyle(Color.primary)
+                    .font(.system(size: 13 * scale))
                 .frame(width: 26 * scale, height: 26 * scale)
                 .contentShape(Rectangle())
             }
@@ -702,12 +697,9 @@ struct FolderPeekView: View {
         let dropped = Set(urls)
         let matching = panel.stacks.first { Set($0.urls) == dropped }
         let snapshot = matching ?? FileStack(urls: urls)
-        Task { @MainActor in
-            let title = await ClaudeService.stackTitle(for: snapshot.urls)
-            StackHistoryStore.shared.archive(snapshot, title: title)
-            if let matching {
-                panel.clearStack(matching.id)
-            }
+        StackHistoryStore.shared.archiveAndName(snapshot)
+        if let matching {
+            panel.clearStack(matching.id)
         }
     }
 

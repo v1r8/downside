@@ -22,12 +22,46 @@ final class StackHistoryStore: ObservableObject {
 
     @Published private(set) var archived: [ArchivedStack] = []
 
+    /// Fichas cujo título ainda está sendo gerado pela IA — a UI mostra
+    /// o efeito mágico no lugar do nome, mas a ficha já é utilizável.
+    @Published private(set) var namingIDs: Set<UUID> = []
+
     private var storeURL: URL {
         Prefs.supportDirectory("Fichario").appendingPathComponent("historico.json")
     }
 
     private init() {
         load()
+    }
+
+    /// Arquiva IMEDIATAMENTE (ficha utilizável na hora) e nomeia em
+    /// segundo plano.
+    func archiveAndName(_ stack: FileStack) {
+        let entry = ArchivedStack(
+            id: UUID(),
+            title: "",
+            date: Date(),
+            paths: stack.urls.map(\.path),
+            outputPaths: stack.outputs.map(\.path),
+            hadBulkAction: stack.hadBulkAction
+        )
+        archived.insert(entry, at: 0)
+        save()
+        nameEntry(entry.id, urls: stack.urls)
+    }
+
+    /// Regera o título de uma ficha existente (com o efeito mágico).
+    func regenerateTitle(_ entry: ArchivedStack) {
+        nameEntry(entry.id, urls: entry.urls)
+    }
+
+    private func nameEntry(_ id: UUID, urls: [URL]) {
+        namingIDs.insert(id)
+        Task { [weak self] in
+            let title = await ClaudeService.stackTitle(for: urls)
+            self?.rename(id, to: title)
+            self?.namingIDs.remove(id)
+        }
     }
 
     func archive(_ stack: FileStack, title: String) {

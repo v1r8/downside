@@ -28,10 +28,10 @@ final class BulkActionRunner: ObservableObject {
                 for output in outputs {
                     panel.addOutput(output, to: stack.id)
                 }
-                // Fotografa a pilha (originais + outputs) no fichário.
+                // Fotografa a pilha (originais + outputs) no fichário,
+                // com a nomeação rodando em segundo plano.
                 if let updated = panel.stacks.first(where: { $0.id == stack.id }) {
-                    let title = await ClaudeService.stackTitle(for: updated.urls)
-                    StackHistoryStore.shared.archive(updated, title: title)
+                    StackHistoryStore.shared.archiveAndName(updated)
                 }
                 message = outputs.isEmpty ? "Nada para processar" : "Concluído ✓"
             } catch {

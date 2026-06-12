@@ -55,13 +55,7 @@ enum ClaudeService {
         }
         let fallback = "Pilha de \(Date().formatted(date: .abbreviated, time: .shortened))"
         guard hasKey else { return fallback }
-        let names = urls.prefix(20).map(\.lastPathComponent).joined(separator: "\n")
-        let prompt = """
-        Dê um título curto (3 a 6 palavras, em português, sem aspas nem \
-        pontuação final) que descreva o tema comum destes arquivos:
-
-        \(names)
-        """
+        let prompt = await TitlePrompt.build(for: urls)
         let title = (try? await complete(
             prompt: prompt,
             model: "claude-haiku-4-5-20251001",

@@ -298,7 +298,7 @@ enum Prefs {
     /// trechos do conteúdo.
     static var stackTitleDetail: Int {
         let value = UserDefaults.standard.integer(forKey: PrefKey.stackTitleDetail)
-        return (1...2).contains(value) ? value : 1
+        return (1...2).contains(value) ? value : 2
     }
 
     /// Indicador de ações em massa: 1 = carta no fim do deck;

@@ -90,7 +90,8 @@ enum OllamaService {
     static func stackTitle(for urls: [URL]) async -> String? {
         let model = Prefs.ollamaModel
         guard await isRunning(), await hasModel(model) else { return nil }
-        guard let raw = try? await generate(prompt: TitlePrompt.build(for: urls), model: model) else {
+        let prompt = await TitlePrompt.build(for: urls)
+        guard let raw = try? await generate(prompt: prompt, model: model) else {
             return nil
         }
         let title = raw

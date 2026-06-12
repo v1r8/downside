@@ -321,19 +321,13 @@ private struct StackChip: View {
                             )
                     }
 
-                    // Indicador "carta no fim do deck": uma cartinha na
-                    // cor dos outputs fecha o leque.
+                    // Indicador holográfico: carta brilhante à ESQUERDA,
+                    // atrás de todos os ícones do deck.
                     if stack.hadBulkAction, Prefs.bulkBadgeStyle == 1 {
-                        RoundedRectangle(cornerRadius: 2, style: .continuous)
-                            .fill(Theme.outputTint(0.9))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.4), lineWidth: 0.8)
-                            )
-                            .frame(width: 9 * scale, height: 13 * scale)
-                            .rotationEffect(.degrees(9))
-                            .padding(.leading, 21 * scale)
-                            .zIndex(10)
+                        HoloCardBadge(width: 13 * scale, height: 18 * scale)
+                            .rotationEffect(.degrees(-10))
+                            .offset(x: -6 * scale)
+                            .zIndex(0)
                     }
                 }
                 .frame(width: 36 * scale, alignment: .leading)
@@ -662,12 +656,10 @@ private struct StackDetailContent: View {
                 try await runner.keywords($0)
             }
         case "arquivar":
-            let snapshot = stack
-            Task { @MainActor in
-                let title = await ClaudeService.stackTitle(for: snapshot.urls)
-                StackHistoryStore.shared.archive(snapshot, title: title)
-                panel.clearStack(snapshot.id)
-            }
+            // Instantâneo: a ficha entra no fichário na hora e a IA
+            // nomeia em segundo plano (efeito mágico no lugar do nome).
+            StackHistoryStore.shared.archiveAndName(stack)
+            panel.clearStack(stack.id)
             onClose()
         default:
             break
