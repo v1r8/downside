@@ -96,6 +96,8 @@ final class PanelController: ObservableObject {
 
         let panel = ensurePanel()
         folderMonitor.reload()
+        // Expurga entradas do clipboard cujos arquivos foram apagados.
+        AppState.shared.clipboard.pruneMissing()
 
         let mode = Prefs.viewMode
         if mode == .minimal {

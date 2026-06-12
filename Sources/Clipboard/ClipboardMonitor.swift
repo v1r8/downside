@@ -106,6 +106,22 @@ final class ClipboardMonitor: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Remove itens da lista (chamado quando docs do clipboard são
+    /// apagados/movidos ao Lixo — paridade com os docs da pasta).
+    func remove(_ urls: [URL]) {
+        let removed = Set(urls)
+        let before = items.count
+        items.removeAll { removed.contains($0.url) }
+        if items.count != before { save() }
+    }
+
+    /// Expurga entradas cujos arquivos sumiram (apagados por fora).
+    func pruneMissing() {
+        let before = items.count
+        items.removeAll { !FileManager.default.fileExists(atPath: $0.url.path) }
+        if items.count != before { save() }
+    }
+
     private func add(_ newItems: [FileItem]) {
         var merged = newItems + items.filter { existing in
             !newItems.contains(where: { $0.url == existing.url })

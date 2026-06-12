@@ -275,7 +275,7 @@ struct FolderPeekView: View {
                     clipboardTimeline.toggle()
                 }
             } label: {
-                Image(systemName: clipboardTimeline ? "doc.fill" : "doc")
+                Image(systemName: clipboardTimeline ? "book.fill" : "book")
                     .foregroundStyle(Color.primary)
                     .font(.system(size: 13 * scale))
                 .frame(width: 26 * scale, height: 26 * scale)
@@ -329,7 +329,7 @@ struct FolderPeekView: View {
                         showHistory.toggle()
                     }
                 } label: {
-                    Image(systemName: showHistory ? "book.fill" : "book")
+                    Image(systemName: showHistory ? "doc.fill" : "doc")
                         .foregroundStyle(
                             historyDropTargeted || panel.isDraggingFromPanel || panel.externalDragActive
                                 ? Theme.accent
@@ -339,8 +339,8 @@ struct FolderPeekView: View {
                         // sobre o alvo, alarga ainda mais.
                         .frame(
                             width: historyDropTargeted
-                                ? 64 * scale
-                                : (panel.isDraggingFromPanel || panel.externalDragActive ? 48 : 26) * scale,
+                                ? 58 * scale
+                                : (panel.isDraggingFromPanel || panel.externalDragActive ? 44 : 26) * scale,
                             height: 26 * scale
                         )
                         .contentShape(Capsule())
@@ -358,18 +358,19 @@ struct FolderPeekView: View {
                         )
                         .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
                 )
-                // Ampliação com mola viva; RETORNO mais amaciado (sem
-                // quicar de volta).
+                // Ampliação com mola viva; RETORNO criticamente
+                // amortecido — desliza de volta sem nenhum quique, e o
+                // espaçamento dos vizinhos acompanha a mesma curva.
                 .animation(
                     historyDropTargeted
-                        ? .spring(response: 0.26, dampingFraction: 0.7)
-                        : .spring(response: 0.38, dampingFraction: 0.92),
+                        ? .spring(response: 0.28, dampingFraction: 0.74)
+                        : .spring(response: 0.45, dampingFraction: 1.0),
                     value: historyDropTargeted
                 )
                 .animation(
                     (panel.isDraggingFromPanel || panel.externalDragActive)
-                        ? .spring(response: 0.3, dampingFraction: 0.74)
-                        : .spring(response: 0.4, dampingFraction: 0.94),
+                        ? .spring(response: 0.32, dampingFraction: 0.78)
+                        : .spring(response: 0.5, dampingFraction: 1.0),
                     value: panel.isDraggingFromPanel || panel.externalDragActive
                 )
                 .onDrop(of: [.fileURL], isTargeted: $historyDropTargeted) { providers in
@@ -828,6 +829,8 @@ struct FolderPeekView: View {
             try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
         }
         selection.subtract(urls)
+        // Docs do clipboard saem da lista junto (paridade com a pasta).
+        clipboard.remove(urls)
         monitor.reload()
     }
 }

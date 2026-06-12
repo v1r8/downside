@@ -613,6 +613,7 @@ private struct TrashDropTarget: View {
         for url in urls {
             try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
         }
+        AppState.shared.clipboard.remove(urls)
         NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
     }
 }
