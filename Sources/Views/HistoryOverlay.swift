@@ -22,6 +22,9 @@ struct HistoryOverlay: View {
     @ObservedObject private var actionConfig = BulkActionConfigStore.shared
     @AppStorage(PrefKey.historyLayout) private var layoutRaw = 1
     @AppStorage("ficharioFavoritesCollapsed") private var favoritesCollapsed = false
+    /// Deck de cartas do fichário: os ícones voam entre o leque da
+    /// ficha e as linhas do conteúdo expandido (como nas pilhas).
+    @Namespace private var deck
 
     /// Organizações do fichário: lista + 5 alternativas.
     enum HistoryLayout: Int, CaseIterable {
@@ -382,8 +385,15 @@ struct HistoryOverlay: View {
                     // Profundidade explícita: sem isto a carta holográfica
                     // sempre ficava à frente, ignorando a configuração.
                     .zIndex(Double(3 - index))
+                    // O leque é a âncora: ao expandir/fechar a ficha, as
+                    // cartas voam daqui para as linhas e de volta.
+                    .matchedGeometryEffect(
+                        id: "fich-\(entry.id)-\(url.path)",
+                        in: deck,
+                        isSource: true
+                    )
             }
-            if entry.hadBulkAction, Prefs.bulkBadgeStyle == 1 {
+            if entry.hadBulkAction, !entry.outputPaths.isEmpty, Prefs.bulkBadgeStyle == 1 {
                 HoloCardBadge(
                     width: size * 0.62 * scale,
                     height: size * 0.9 * scale
@@ -449,7 +459,7 @@ struct HistoryOverlay: View {
 
     @ViewBuilder
     private func bulkStar(_ entry: ArchivedStack) -> some View {
-        if entry.hadBulkAction, Prefs.bulkBadgeStyle == 2 {
+        if entry.hadBulkAction, !entry.outputPaths.isEmpty, Prefs.bulkBadgeStyle == 2 {
             Image(systemName: "sparkles")
                 .font(.system(size: 10 * scale, weight: .semibold))
                 .foregroundStyle(Theme.output)
@@ -458,7 +468,7 @@ struct HistoryOverlay: View {
 
     @ViewBuilder
     private func bulkDot(_ entry: ArchivedStack) -> some View {
-        if entry.hadBulkAction, Prefs.bulkBadgeStyle == 3 {
+        if entry.hadBulkAction, !entry.outputPaths.isEmpty, Prefs.bulkBadgeStyle == 3 {
             Circle()
                 .fill(Theme.output)
                 .frame(width: 5 * scale, height: 5 * scale)
@@ -861,6 +871,11 @@ struct HistoryOverlay: View {
         HStack(spacing: 6 * scale) {
             ThumbnailView(url: url)
                 .frame(width: 18 * scale, height: 18 * scale)
+                .matchedGeometryEffect(
+                    id: "fich-\(entry.id)-\(url.path)",
+                    in: deck,
+                    isSource: false
+                )
             Text(url.lastPathComponent)
                 .font(.system(size: 10.5 * scale))
                 .lineLimit(1)

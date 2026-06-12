@@ -254,6 +254,11 @@ final class PanelController: ObservableObject {
     func removeFromStack(_ id: UUID, url: URL) {
         guard let index = stacks.firstIndex(where: { $0.id == id }) else { return }
         stacks[index].urls.removeAll { $0 == url }
+        stacks[index].outputs.remove(url)
+        // Sem outputs restantes, o indicador de ação em massa some.
+        if stacks[index].outputs.isEmpty {
+            stacks[index].hadBulkAction = false
+        }
         if stacks[index].urls.isEmpty {
             stacks.remove(at: index)
         }
@@ -343,6 +348,7 @@ final class PanelController: ObservableObject {
         switch mode {
         case .grid: base = Prefs.panelSize
         case .list: base = NSSize(width: 460, height: 500)
+        case .timeline: base = NSSize(width: 460, height: 520)
         case .minimal: base = NSSize(width: 360, height: 540)
         }
         return NSSize(width: base.width * scale, height: base.height * scale)

@@ -346,11 +346,20 @@ private struct StackSettingsTab: View {
 
             Section("Abertura do fichário") {
                 Picker("Animação", selection: $revealStyle) {
-                    Text("Expansão a partir do botão").tag(1)
-                    Text("Desvanecer").tag(2)
-                    Text("Instantânea").tag(3)
+                    Text("Círculo limpo").tag(1)
+                    Text("Tinta se espalhando").tag(2)
+                    Text("Água (ondas)").tag(3)
+                    Text("Explosão transparente").tag(4)
+                    Text("Aurora irisada").tag(5)
+                    Text("Pétalas").tag(6)
+                    Text("Véu desfocado").tag(7)
+                    Text("Desvanecer").tag(8)
+                    Text("Instantânea").tag(9)
                 }
-                if revealStyle != 3 {
+                Text("Todas partem da bolha do fichário e voltam para ela ao fechar.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if revealStyle != 9 {
                     VStack(alignment: .leading) {
                         Slider(value: $revealSpeed, in: 0.15...0.7) {
                             Text("Velocidade")

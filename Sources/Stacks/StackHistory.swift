@@ -103,6 +103,10 @@ final class StackHistoryStore: ObservableObject {
         guard let index = archived.firstIndex(where: { $0.id == id }) else { return }
         archived[index].paths.removeAll { $0 == url.path }
         archived[index].outputPaths.removeAll { $0 == url.path }
+        // Sem outputs restantes, o indicador de ação em massa some.
+        if archived[index].outputPaths.isEmpty {
+            archived[index].hadBulkAction = false
+        }
         save()
     }
 

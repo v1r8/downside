@@ -289,7 +289,7 @@ private struct StackChip: View {
     var body: some View {
         HStack(spacing: 6 * scale) {
             // Indicador de bulk action, estilo "estrela à esquerda".
-            if stack.hadBulkAction, Prefs.bulkBadgeStyle == 2 {
+            if stack.hadBulkAction, !stack.outputs.isEmpty, Prefs.bulkBadgeStyle == 2 {
                 Image(systemName: "sparkles")
                     .font(.system(size: 10 * scale, weight: .semibold))
                     .foregroundStyle(Theme.output)
@@ -323,7 +323,7 @@ private struct StackChip: View {
 
                     // Indicador holográfico: carta brilhante à ESQUERDA,
                     // atrás de todos os ícones do deck.
-                    if stack.hadBulkAction, Prefs.bulkBadgeStyle == 1 {
+                    if stack.hadBulkAction, !stack.outputs.isEmpty, Prefs.bulkBadgeStyle == 1 {
                         HoloCardBadge(width: 13 * scale, height: 18 * scale)
                             .rotationEffect(.degrees(-10))
                             .offset(x: -6 * scale)
@@ -341,7 +341,7 @@ private struct StackChip: View {
                 .background(GlassCapsule(tint: 0.7))
                 .overlay(alignment: .topTrailing) {
                     // Indicador "ponto no contador".
-                    if stack.hadBulkAction, Prefs.bulkBadgeStyle == 3 {
+                    if stack.hadBulkAction, !stack.outputs.isEmpty, Prefs.bulkBadgeStyle == 3 {
                         Circle()
                             .fill(Theme.output)
                             .frame(width: 5 * scale, height: 5 * scale)

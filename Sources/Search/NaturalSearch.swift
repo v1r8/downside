@@ -293,7 +293,9 @@ enum NaturalSearch {
 
     // MARK: - Match
 
-    static func matches(_ item: FileItem, query: ParsedQuery) -> Bool {
+    /// `content`: texto indexado do arquivo (já normalizado) — cada
+    /// termo pode casar no NOME ou no CONTEÚDO.
+    static func matches(_ item: FileItem, query: ParsedQuery, content: String? = nil) -> Bool {
         if !query.kinds.isEmpty {
             guard let kind = kind(of: item), query.kinds.contains(kind) else { return false }
         }
@@ -308,8 +310,12 @@ enum NaturalSearch {
         }
         if !query.nameTerms.isEmpty {
             let name = normalize(item.name)
-            for term in query.nameTerms where !name.contains(term) {
-                return false
+            for term in query.nameTerms {
+                let inName = name.contains(term)
+                let inContent = content?.contains(term) ?? false
+                if !inName && !inContent {
+                    return false
+                }
             }
         }
         return true

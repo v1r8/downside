@@ -40,6 +40,12 @@ struct FolderPeekView: View {
     @AppStorage(PrefKey.clipboardStyle) private var clipboardStyle = 2
     @AppStorage(PrefKey.cleanButtonEnabled) private var cleanButtonEnabled = true
     @ObservedObject private var history = StackHistoryStore.shared
+    @ObservedObject private var contentIndex = ContentIndex.shared
+
+    /// Posições reais (no espaço do painel) da bolha do fichário e da
+    /// área de conteúdo — a expansão parte EXATAMENTE da bolha.
+    @State private var bubbleFrame: CGRect = .zero
+    @State private var revealAreaFrame: CGRect = .zero
 
     private let gridSpace = "downside.grid"
 
@@ -51,18 +57,32 @@ struct FolderPeekView: View {
         panel.isDraggingFromPanel || panel.externalDragActive || panel.hasStacks
     }
 
-    /// Abertura do fichário, configurável: a área se expande a partir
-    /// do botão até ocupar o painel; fechar inverte a mesma animação.
+    /// Abertura do fichário, configurável: a fronteira se expande a
+    /// partir da bolha até ocupar o painel; fechar inverte a mesma
+    /// animação, voltando para a bolha.
     private var historyTransition: AnyTransition {
-        switch Prefs.ficharioRevealStyle {
-        case 2: return .opacity
-        case 3: return .identity
+        let style = Prefs.ficharioRevealStyle
+        switch style {
+        case 8: return .opacity
+        case 9: return .identity
         default:
             return .modifier(
-                active: CircleRevealModifier(progress: 0),
-                identity: CircleRevealModifier(progress: 1)
+                active: RevealEffectModifier(progress: 0, style: style, center: revealCenter),
+                identity: RevealEffectModifier(progress: 1, style: style, center: revealCenter)
             )
         }
+    }
+
+    /// Centro da expansão: a bolha do fichário, medida de verdade
+    /// (coordenadas relativas à área de conteúdo).
+    private var revealCenter: CGPoint {
+        guard bubbleFrame != .zero, revealAreaFrame != .zero else {
+            return CGPoint(x: 28 * scale, y: -22 * scale)
+        }
+        return CGPoint(
+            x: bubbleFrame.midX - revealAreaFrame.minX,
+            y: bubbleFrame.midY - revealAreaFrame.minY
+        )
     }
 
     private var revealAnimation: Animation {
@@ -76,7 +96,6 @@ struct FolderPeekView: View {
         Rectangle()
             .fill(.regularMaterial)
             .overlay(Rectangle().fill(Theme.tint(0.035)))
-            .ignoresSafeArea()
     }
 
     private var scale: CGFloat {
@@ -101,7 +120,11 @@ struct FolderPeekView: View {
                 .sorted { $0.date > $1.date }
         }
         guard let query = parsedQuery else { return base }
-        return base.filter { NaturalSearch.matches($0, query: query) }
+        // Busca global: o termo pode casar no nome OU no conteúdo
+        // indexado (texto, PDF, OCR de imagens, dossiê de links).
+        return base.filter {
+            NaturalSearch.matches($0, query: query, content: contentIndex.text(for: $0.url))
+        }
     }
 
     /// Itens da pasta com mais de 30 dias — alvo da limpeza.
@@ -114,7 +137,12 @@ struct FolderPeekView: View {
     private var stackHits: [URL] {
         guard let query = parsedQuery else { return [] }
         return panel.stacks.flatMap(\.urls)
-            .filter { NaturalSearch.matches(FileItem(url: $0), query: query) }
+            .filter {
+                NaturalSearch.matches(
+                    FileItem(url: $0), query: query,
+                    content: contentIndex.text(for: $0)
+                )
+            }
     }
 
     /// Resultados do fichário agrupados pela pilha onde vivem.
@@ -123,7 +151,10 @@ struct FolderPeekView: View {
         var groups: [(ArchivedStack, [URL])] = []
         for entry in history.archived.prefix(60) {
             let hits = entry.urls.prefix(30).filter {
-                NaturalSearch.matches(FileItem(url: $0), query: query)
+                NaturalSearch.matches(
+                    FileItem(url: $0), query: query,
+                    content: contentIndex.text(for: $0)
+                )
             }
             if !hits.isEmpty {
                 groups.append((entry, Array(hits.prefix(10))))
@@ -274,6 +305,19 @@ struct FolderPeekView: View {
                         .zIndex(1)
                 }
             }
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: RootFramesKey.self,
+                        value: ["area": proxy.frame(in: .named("downside.root"))]
+                    )
+                }
+            )
+        }
+        .coordinateSpace(name: "downside.root")
+        .onPreferenceChange(RootFramesKey.self) { frames in
+            if let bubble = frames["bubble"] { bubbleFrame = bubble }
+            if let area = frames["area"] { revealAreaFrame = area }
         }
         .animation(revealAnimation, value: showHistory)
         .alert("Limpar a pasta?", isPresented: $confirmClean) {
@@ -318,6 +362,17 @@ struct FolderPeekView: View {
             panel.preview.dismiss()
             panel.refreshAppearance()
         }
+        // Buscar dispara a indexação de conteúdo do que está ao
+        // alcance (pasta, clipboard, pilhas e fichário) — os
+        // resultados vão se completando conforme o índice avança.
+        .onChange(of: searchText) { _, _ in
+            guard parsedQuery?.nameTerms.isEmpty == false else { return }
+            var urls = monitor.items.map(\.url)
+            urls += clipboard.items.map(\.url)
+            urls += panel.stacks.flatMap(\.urls)
+            urls += history.archived.prefix(80).flatMap { $0.urls.prefix(20) }
+            ContentIndex.shared.ensureIndexed(urls)
+        }
     }
 
     // MARK: - Cabeçalho
@@ -339,6 +394,14 @@ struct FolderPeekView: View {
                     showHistory.toggle()
                 }
             }
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: RootFramesKey.self,
+                        value: ["bubble": proxy.frame(in: .named("downside.root"))]
+                    )
+                }
+            )
             .onDrop(of: [.fileURL], isTargeted: $historyDropTargeted) { providers in
                 StackDropHandler.collectFileURLs(providers) { urls in
                     archiveDropped(urls)
@@ -574,20 +637,19 @@ struct FolderPeekView: View {
         case .list:
             LazyVStack(spacing: 2) {
                 ForEach(displayedItems) { item in
-                    HStack(spacing: 6 * scale) {
-                        interactive(item) {
-                            FileRow(
-                                item: item,
-                                isSelected: selection.contains(item.url),
-                                scale: scale,
-                                isHovered: hoveredItem == item.url
-                            )
-                        }
-                        if item.url.pathExtension.lowercased() == "ics" {
-                            CalendarAddButton(url: item.url, scale: scale)
-                        } else if item.url.pathExtension.lowercased() == "dmg" {
-                            DMGActionButton(url: item.url, scale: scale)
-                        }
+                    listRow(item)
+                }
+            }
+        case .timeline:
+            LazyVStack(alignment: .leading, spacing: 2) {
+                ForEach(docTimelineGroups, id: \.0) { group in
+                    Text(group.0)
+                        .font(.system(size: 10 * scale, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8 * scale)
+                        .padding(.horizontal, 4 * scale)
+                    ForEach(group.1) { item in
+                        listRow(item)
                     }
                 }
             }
@@ -604,6 +666,45 @@ struct FolderPeekView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Linha compartilhada pelos modos Lista e Linha do tempo.
+    private func listRow(_ item: FileItem) -> some View {
+        HStack(spacing: 6 * scale) {
+            interactive(item) {
+                FileRow(
+                    item: item,
+                    isSelected: selection.contains(item.url),
+                    scale: scale,
+                    isHovered: hoveredItem == item.url
+                )
+            }
+            if item.url.pathExtension.lowercased() == "ics" {
+                CalendarAddButton(url: item.url, scale: scale)
+            } else if item.url.pathExtension.lowercased() == "dmg" {
+                DMGActionButton(url: item.url, scale: scale)
+            }
+        }
+    }
+
+    /// Agrupamento por período do modo Linha do tempo.
+    private var docTimelineGroups: [(String, [FileItem])] {
+        let calendar = Calendar.current
+        let now = Date()
+        func bucket(_ date: Date) -> String {
+            if calendar.isDateInToday(date) { return "Hoje" }
+            if calendar.isDateInYesterday(date) { return "Ontem" }
+            if let week = calendar.dateInterval(of: .weekOfYear, for: now),
+               week.contains(date) { return "Esta semana" }
+            if let month = calendar.dateInterval(of: .month, for: now),
+               month.contains(date) { return "Este mês" }
+            return "Anteriores"
+        }
+        let order = ["Hoje", "Ontem", "Esta semana", "Este mês", "Anteriores"]
+        let grouped = Dictionary(grouping: displayedItems) { bucket($0.date) }
+        return order.compactMap { key in
+            grouped[key].map { (key, $0) }
         }
     }
 
@@ -1242,38 +1343,138 @@ private struct FicharioBubble: View {
     }
 }
 
-/// Abertura do fichário: um círculo que nasce na bolha e se expande
-/// até revelar o painel inteiro; fechar encolhe de volta (a mesma
-/// animação, invertida pelo próprio SwiftUI). Sem fade — o fichário é
-/// opaco e o recorte faz o trabalho. Um anel na cor de destaque marca
-/// a fronteira do círculo enquanto ele viaja, e o conteúdo tem um
-/// parallax sutil (nasce 2% menor, ancorado na bolha) para dar
-/// profundidade à expansão e principalmente à retração.
-private struct CircleRevealModifier: ViewModifier, Animatable {
+private struct RootFramesKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+/// Abertura do fichário: a fronteira nasce na bolha (centro medido de
+/// verdade) e se expande até revelar o painel inteiro; fechar encolhe
+/// de volta, na mesma animação invertida. Sem fade — o fichário é
+/// opaco e o recorte faz o trabalho. Sete efeitos de fronteira:
+/// 1 círculo limpo · 2 tinta se espalhando (borda orgânica ondulada) ·
+/// 3 água (frente + marolas atrás) · 4 explosão transparente (onda de
+/// choque luminosa) · 5 aurora irisada · 6 pétalas · 7 véu desfocado.
+private struct RevealEffectModifier: ViewModifier, Animatable {
     var progress: CGFloat
+    let style: Int
+    let center: CGPoint
 
     var animatableData: CGFloat {
         get { progress }
         set { progress = newValue }
     }
 
+    private var amp: CGFloat {
+        switch style {
+        case 2: return 0.07   // tinta: borda bem orgânica
+        case 3: return 0.025  // água: ondulação fina
+        case 6: return 0.055  // pétalas
+        default: return 0
+        }
+    }
+
+    private var freq: CGFloat {
+        switch style {
+        case 2: return 7
+        case 3: return 12
+        case 6: return 6
+        default: return 0
+        }
+    }
+
+    /// Tinta/água ondulam enquanto viajam; pétalas ficam fixas.
+    private var phase: CGFloat {
+        style == 6 ? 0.4 : progress * .pi * 3
+    }
+
+    private func shape(_ p: CGFloat) -> RevealShape {
+        RevealShape(progress: p, center: center, amp: amp, freq: freq, phase: phase)
+    }
+
     func body(content: Content) -> some View {
         content
             .scaleEffect(0.98 + 0.02 * progress, anchor: .topLeading)
-            .clipShape(RevealCircle(progress: progress))
-            .overlay(
-                RevealCircle(progress: progress)
+            .clipShape(shape(progress))
+            .overlay(boundary.allowsHitTesting(false))
+    }
+
+    /// Efeito aplicado à FRONTEIRA que viaja — some quando completa.
+    @ViewBuilder
+    private var boundary: some View {
+        let fade = Double(1 - progress)
+        ZStack {
+            switch style {
+            case 2: // Tinta: frente densa com mancha escura molhada.
+                shape(progress)
+                    .stroke(Theme.tint(0.75 * fade), lineWidth: 2.5)
+                    .blur(radius: 0.8)
+                shape(progress)
+                    .stroke(Color.black.opacity(0.16 * fade), lineWidth: 7)
+                    .blur(radius: 5)
+            case 3: // Água: frente fina e marolas que vêm atrás.
+                shape(progress)
+                    .stroke(Theme.tint(0.55 * fade), lineWidth: 1.2)
+                RevealShape(
+                    progress: max(0, progress - 0.09), center: center,
+                    amp: 0.02, freq: 13, phase: phase + 1.3
+                )
+                .stroke(Theme.tint(0.3 * fade), lineWidth: 1)
+                RevealShape(
+                    progress: max(0, progress - 0.18), center: center,
+                    amp: 0.016, freq: 11, phase: phase + 2.6
+                )
+                .stroke(Theme.tint(0.16 * fade), lineWidth: 1)
+            case 4: // Explosão: onda de choque com halo luminoso.
+                shape(progress)
+                    .stroke(Color.white.opacity(0.85 * fade), lineWidth: 1.5)
+                shape(progress)
+                    .stroke(Theme.tint(0.65 * fade), lineWidth: 9)
+                    .blur(radius: 7)
+            case 5: // Aurora: fronteira irisada com halo suave.
+                shape(progress)
                     .stroke(
-                        Theme.tint(Double(1 - progress) * 0.7),
-                        lineWidth: 1.5
+                        AngularGradient(
+                            colors: [Theme.accent, .cyan, .purple, Theme.accent],
+                            center: .center
+                        ),
+                        lineWidth: 2.5
                     )
-                    .allowsHitTesting(false)
-            )
+                    .opacity(fade)
+                    .blur(radius: 0.5)
+                shape(progress)
+                    .stroke(Theme.tint(0.3 * fade), lineWidth: 10)
+                    .blur(radius: 9)
+            case 6: // Pétalas: contorno fino na forma de flor.
+                shape(progress)
+                    .stroke(Theme.tint(0.6 * fade), lineWidth: 1.5)
+            case 7: // Véu desfocado: banda frosted sem anel definido.
+                shape(progress)
+                    .stroke(Theme.tint(0.22 * fade), lineWidth: 18)
+                    .blur(radius: 14)
+                shape(progress)
+                    .stroke(Color.white.opacity(0.22 * fade), lineWidth: 2)
+                    .blur(radius: 2)
+            default: // 1: círculo limpo com anel fino de destaque.
+                shape(progress)
+                    .stroke(Theme.tint(0.7 * fade), lineWidth: 1.5)
+            }
+        }
     }
 }
 
-private struct RevealCircle: Shape {
+/// Forma da fronteira: círculo (amp 0) ou blob orgânico com a borda
+/// modulada por uma senoide radial — sempre centrada na bolha e
+/// dimensionada para cobrir o canto mais distante quando completa.
+private struct RevealShape: Shape {
     var progress: CGFloat
+    var center: CGPoint
+    var amp: CGFloat
+    var freq: CGFloat
+    var phase: CGFloat
 
     var animatableData: CGFloat {
         get { progress }
@@ -1281,16 +1482,41 @@ private struct RevealCircle: Shape {
     }
 
     func path(in rect: CGRect) -> Path {
-        // Centro na posição aproximada da bolha (acima, à esquerda).
-        let center = CGPoint(x: rect.minX + 26, y: rect.minY - 20)
-        let reach = hypot(rect.width, rect.height) + 40
-        let radius = max(1, 10 + progress * reach)
-        return Path(ellipseIn: CGRect(
-            x: center.x - radius,
-            y: center.y - radius,
-            width: radius * 2,
-            height: radius * 2
-        ))
+        let c = CGPoint(x: rect.minX + center.x, y: rect.minY + center.y)
+        let corners = [
+            CGPoint(x: rect.minX, y: rect.minY),
+            CGPoint(x: rect.maxX, y: rect.minY),
+            CGPoint(x: rect.minX, y: rect.maxY),
+            CGPoint(x: rect.maxX, y: rect.maxY),
+        ]
+        let reach = corners.map { hypot($0.x - c.x, $0.y - c.y) }.max()
+            ?? hypot(rect.width, rect.height)
+        // Margem cobre a ondulação para o fim sempre fechar inteiro.
+        let radius = max(1, 12 + progress * (reach + 40 + reach * amp * 1.5))
+
+        guard amp > 0 else {
+            return Path(ellipseIn: CGRect(
+                x: c.x - radius, y: c.y - radius,
+                width: radius * 2, height: radius * 2
+            ))
+        }
+
+        // A ondulação relaxa perto do fim — a forma "assenta".
+        let wobble = amp * radius * (1 - progress * 0.8)
+        var path = Path()
+        let steps = 96
+        for i in 0...steps {
+            let angle = CGFloat(i) / CGFloat(steps) * 2 * .pi
+            let r = radius + sin(angle * freq + phase) * wobble
+            let point = CGPoint(x: c.x + cos(angle) * r, y: c.y + sin(angle) * r)
+            if i == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
+        }
+        path.closeSubpath()
+        return path
     }
 }
 

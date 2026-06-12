@@ -45,6 +45,7 @@ enum HotCorner: String, CaseIterable, Identifiable {
 enum ViewMode: String, CaseIterable, Identifiable {
     case grid
     case list
+    case timeline
     case minimal
 
     var id: String { rawValue }
@@ -53,6 +54,7 @@ enum ViewMode: String, CaseIterable, Identifiable {
         switch self {
         case .grid: return "Grade"
         case .list: return "Lista"
+        case .timeline: return "Linha do tempo"
         case .minimal: return "Minimalista"
         }
     }
@@ -61,6 +63,7 @@ enum ViewMode: String, CaseIterable, Identifiable {
         switch self {
         case .grid: return "square.grid.2x2"
         case .list: return "list.bullet"
+        case .timeline: return "calendar.day.timeline.left"
         case .minimal: return "text.alignleft"
         }
     }
@@ -69,6 +72,7 @@ enum ViewMode: String, CaseIterable, Identifiable {
         switch self {
         case .grid: return "Miniaturas grandes em grade, como o Finder"
         case .list: return "Linhas compactas com preview, tamanho e data"
+        case .timeline: return "Linhas agrupadas por período: hoje, ontem, esta semana…"
         case .minimal: return "Só os nomes, sem fundo, com leve escurecimento da tela"
         }
     }
@@ -333,11 +337,13 @@ enum Prefs {
         return (1...6).contains(value) ? value : 1
     }
 
-    /// Abertura do fichário: 1 = expansão a partir do botão;
-    /// 2 = desvanecer; 3 = instantânea.
+    /// Abertura do fichário — fronteiras que se expandem a partir da
+    /// bolha: 1 círculo limpo · 2 tinta · 3 água · 4 explosão ·
+    /// 5 aurora · 6 pétalas · 7 véu desfocado · 8 desvanecer ·
+    /// 9 instantânea.
     static var ficharioRevealStyle: Int {
         let value = UserDefaults.standard.integer(forKey: PrefKey.ficharioRevealStyle)
-        return (1...3).contains(value) ? value : 1
+        return (1...9).contains(value) ? value : 1
     }
 
     /// Duração da animação de abertura/fechamento do fichário.
