@@ -11,8 +11,19 @@ final class ClipboardMonitor: ObservableObject {
     private var timer: Timer?
     private var lastChange = NSPasteboard.general.changeCount
 
+    private struct StoredItem: Codable {
+        let path: String
+        let name: String
+        let date: Date
+    }
+
+    private var storeURL: URL {
+        Prefs.supportDirectory("Clipboard").appendingPathComponent("itens.json")
+    }
+
     func start() {
         guard timer == nil else { return }
+        load()
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
@@ -103,6 +114,33 @@ final class ClipboardMonitor: ObservableObject {
             merged = Array(merged.prefix(50))
         }
         items = merged
+        save()
+    }
+
+    /// Persistência: o histórico do clipboard sobrevive a reaberturas.
+    private func load() {
+        guard let data = try? Data(contentsOf: storeURL),
+              let stored = try? JSONDecoder().decode([StoredItem].self, from: data)
+        else { return }
+        items = stored.compactMap { entry in
+            let url = URL(fileURLWithPath: entry.path)
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return FileItem(
+                url: url,
+                name: entry.name,
+                isDirectory: false,
+                date: entry.date,
+                size: Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            )
+        }
+    }
+
+    private func save() {
+        let stored = items.map {
+            StoredItem(path: $0.url.path, name: $0.name, date: $0.date)
+        }
+        guard let data = try? JSONEncoder().encode(stored) else { return }
+        try? data.write(to: storeURL, options: .atomic)
     }
 
     private func stamp() -> String {

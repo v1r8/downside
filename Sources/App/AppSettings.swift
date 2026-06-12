@@ -136,7 +136,12 @@ enum PrefKey {
     static let showDragHandle = "showDragHandle"
     static let accentColorHex = "accentColorHex"
     static let accentIntensity = "accentIntensity"
+    static let outputColorHex = "outputColorHex"
+    static let outputIntensity = "outputIntensity"
     static let archiveHoverPreview = "archiveHoverPreview"
+    static let cleanButtonEnabled = "cleanButtonEnabled"
+    static let clipboardMarkIntensity = "clipboardMarkIntensity"
+    static let clipboardBarWidth = "clipboardBarWidth"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -266,6 +271,23 @@ enum Prefs {
     /// Preview global ao pairar sobre fichas arquivadas.
     static var archiveHoverPreview: Bool {
         UserDefaults.standard.object(forKey: PrefKey.archiveHoverPreview) as? Bool ?? true
+    }
+
+    /// Botão flutuante de limpeza (deck de cartas).
+    static var cleanButtonEnabled: Bool {
+        UserDefaults.standard.object(forKey: PrefKey.cleanButtonEnabled) as? Bool ?? true
+    }
+
+    /// Visibilidade da marcação de itens do clipboard.
+    static var clipboardMarkIntensity: Double {
+        let value = UserDefaults.standard.double(forKey: PrefKey.clipboardMarkIntensity)
+        return (0.3...1.6).contains(value) ? value : 1.0
+    }
+
+    /// Largura da barra lateral (estilo 3) do clipboard.
+    static var clipboardBarWidth: CGFloat {
+        let value = UserDefaults.standard.double(forKey: PrefKey.clipboardBarWidth)
+        return (2...6).contains(value) ? CGFloat(value) : 2.5
     }
 
     /// Chave da API do Claude para os recursos de IA (opcional).

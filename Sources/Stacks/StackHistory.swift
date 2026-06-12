@@ -54,6 +54,14 @@ final class StackHistoryStore: ObservableObject {
         save()
     }
 
+    /// Remove um output de uma ficha (o arquivo é tratado pelo chamador).
+    func removeOutput(_ id: UUID, url: URL) {
+        guard let index = archived.firstIndex(where: { $0.id == id }) else { return }
+        archived[index].paths.removeAll { $0 == url.path }
+        archived[index].outputPaths.removeAll { $0 == url.path }
+        save()
+    }
+
     /// Anexa outputs de uma ação em massa a uma ficha arquivada.
     func appendOutputs(_ id: UUID, urls: [URL]) {
         guard !urls.isEmpty,

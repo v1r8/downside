@@ -38,6 +38,7 @@ struct FolderPeekView: View {
     @AppStorage(PrefKey.clipboardTimeline) private var clipboardTimeline = false
     @AppStorage(PrefKey.showDragHandle) private var showDragHandle = true
     @AppStorage(PrefKey.clipboardStyle) private var clipboardStyle = 2
+    @AppStorage(PrefKey.cleanButtonEnabled) private var cleanButtonEnabled = true
     @ObservedObject private var history = StackHistoryStore.shared
 
     private let gridSpace = "downside.grid"
@@ -255,9 +256,19 @@ struct FolderPeekView: View {
     // MARK: - Cabeçalho
 
     private var header: some View {
-        HStack(spacing: 10 * scale) {
-            // A busca é única (pasta, clipboard, pilhas e fichário) e se
-            // estende até o canto esquerdo.
+        HStack(spacing: 9 * scale) {
+            // Toggle de itens do clipboard na linha do tempo.
+            Button {
+                clipboardTimeline.toggle()
+            } label: {
+                Image(systemName: clipboardTimeline ? "doc.on.clipboard.fill" : "doc.on.clipboard")
+                    .foregroundStyle(clipboardTimeline ? Theme.accent : Color.primary)
+                    .frame(width: 24 * scale, height: 24 * scale)
+                    .contentShape(Rectangle())
+            }
+            .help(clipboardTimeline ? "Ocultar itens do clipboard" : "Mostrar itens do clipboard")
+
+            // A busca é única (pasta, clipboard, pilhas e fichário).
             searchField
 
             // Ao selecionar, a busca encolhe e o contador surge ao lado.
@@ -469,12 +480,14 @@ struct FolderPeekView: View {
                             .transition(.scale(scale: 0.7).combined(with: .opacity))
                         }
 
-                        CleanCardsButton(scale: scale) {
-                            guard cleaning == nil else { return }
-                            if cleanableItems.isEmpty {
-                                NSSound.beep()
-                            } else {
-                                confirmClean = true
+                        if cleanButtonEnabled {
+                            CleanCardsButton(scale: scale) {
+                                guard cleaning == nil else { return }
+                                if cleanableItems.isEmpty {
+                                    NSSound.beep()
+                                } else {
+                                    confirmClean = true
+                                }
                             }
                         }
                     }
@@ -841,6 +854,9 @@ struct ClipboardMark: ViewModifier {
     let style: Int
     let scale: CGFloat
 
+    /// Visibilidade ajustável nas configurações.
+    private var boost: Double { Prefs.clipboardMarkIntensity }
+
     func body(content: Content) -> some View {
         if !active {
             content
@@ -850,14 +866,14 @@ struct ClipboardMark: ViewModifier {
                 content.overlay(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .strokeBorder(
-                            Theme.tint(0.5),
+                            Theme.tint(0.5 * boost),
                             style: StrokeStyle(lineWidth: 1, dash: [3, 3])
                         )
                 )
             case 2: // Selo de clipboard
                 content.overlay(alignment: .topTrailing) {
                     Image(systemName: "doc.on.clipboard.fill")
-                        .font(.system(size: 8 * scale))
+                        .font(.system(size: 8 * scale * boost))
                         .foregroundStyle(Theme.accent)
                         .padding(3 * scale)
                         .allowsHitTesting(false)
@@ -865,8 +881,8 @@ struct ClipboardMark: ViewModifier {
             case 3: // Barra lateral
                 content.overlay(alignment: .leading) {
                     Capsule()
-                        .fill(Theme.tint(0.7))
-                        .frame(width: 2.5)
+                        .fill(Theme.tint(min(1, 0.7 * boost)))
+                        .frame(width: Prefs.clipboardBarWidth)
                         .padding(.vertical, 4 * scale)
                         .allowsHitTesting(false)
                 }
@@ -875,7 +891,7 @@ struct ClipboardMark: ViewModifier {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(
                             LinearGradient(
-                                colors: [Theme.tint(0.12), .clear],
+                                colors: [Theme.tint(0.12 * boost), .clear],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
@@ -884,7 +900,7 @@ struct ClipboardMark: ViewModifier {
             default: // 5: Etiqueta CLIP
                 content.overlay(alignment: .bottomTrailing) {
                     Text("CLIP")
-                        .font(.system(size: 6.5 * scale, weight: .bold))
+                        .font(.system(size: 6.5 * scale * boost, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 4 * scale)
                         .padding(.vertical, 1.5 * scale)

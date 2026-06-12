@@ -16,6 +16,7 @@ final class BulkActionConfigStore: ObservableObject {
     static let shared = BulkActionConfigStore()
 
     static let defaultItems: [BulkActionItem] = [
+        BulkActionItem(id: "abrir", title: "Abrir todos", icon: "arrow.up.forward.app", enabled: true),
         BulkActionItem(id: "pdf", title: "Gerar PDF", icon: "doc.richtext", enabled: true),
         BulkActionItem(id: "links", title: "Baixar links", icon: "link", enabled: true),
         BulkActionItem(id: "resumo", title: "Resumir com IA", icon: "text.alignleft", enabled: true),
@@ -34,13 +35,17 @@ final class BulkActionConfigStore: ObservableObject {
     }
 
     private init() {
+        var loaded = Self.defaultItems
         if let data = UserDefaults.standard.data(forKey: "bulkActions"),
            let decoded = try? JSONDecoder().decode([BulkActionItem].self, from: data),
            !decoded.isEmpty {
-            items = decoded
-        } else {
-            items = Self.defaultItems
+            loaded = decoded
+            // Migração: garante que ações novas do app apareçam.
+            for item in Self.defaultItems where !loaded.contains(where: { $0.id == item.id }) {
+                loaded.insert(item, at: 0)
+            }
         }
+        items = loaded
     }
 
     func move(_ id: String, up: Bool) {
@@ -99,9 +104,15 @@ final class HWheelScrollView: NSScrollView {
         var origin = contentView.bounds.origin
         let maxX = max(0, document.frame.width - contentView.bounds.width)
         origin.x = max(0, min(maxX, origin.x - deltaY * 3))
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
-            contentView.animator().setBoundsOrigin(origin)
+        if event.hasPreciseScrollingDeltas {
+            // Trackpad: resposta imediata (os deltas já são contínuos).
+            contentView.setBoundsOrigin(origin)
+        } else {
+            // Roda "de cliques": suaviza com uma animação curta.
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.12
+                contentView.animator().setBoundsOrigin(origin)
+            }
         }
         reflectScrolledClipView(contentView)
     }

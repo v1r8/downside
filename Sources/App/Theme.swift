@@ -21,6 +21,24 @@ enum Theme {
     static func tint(_ base: Double) -> Color {
         accent.opacity(min(1, base * intensity))
     }
+
+    /// Cor própria dos outputs de bulk actions (✨, chips, fundos).
+    static var output: Color {
+        if let hex = UserDefaults.standard.string(forKey: PrefKey.outputColorHex),
+           let color = Color(hex: hex) {
+            return color
+        }
+        return accent
+    }
+
+    static var outputIntensity: Double {
+        let value = UserDefaults.standard.double(forKey: PrefKey.outputIntensity)
+        return (0.35...1.5).contains(value) ? value : 1.0
+    }
+
+    static func outputTint(_ base: Double) -> Color {
+        output.opacity(min(1, base * outputIntensity))
+    }
 }
 
 extension Color {
@@ -50,11 +68,22 @@ extension Color {
 
 /// Notifica as views quando cor/intensidade dos destaques mudam —
 /// Theme.tint é estático, então sem isto a UI só atualizava ao reabrir.
+/// Observa as preferências por conta própria (independente do AppState).
 @MainActor
 final class ThemeStore: ObservableObject {
     static let shared = ThemeStore()
 
     @Published private(set) var tick = 0
+
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in ThemeStore.shared.bump() }
+        }
+    }
 
     func bump() {
         tick &+= 1
@@ -63,6 +92,7 @@ final class ThemeStore: ObservableObject {
 
 /// Fundo de pílula "liquid glass": material fino + tinta de destaque.
 struct GlassCapsule: View {
+    @ObservedObject private var themeStore = ThemeStore.shared
     var tint: Double = 0.6
 
     var body: some View {

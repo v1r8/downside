@@ -99,7 +99,7 @@ struct HistoryOverlay: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(entry.hadBulkAction ? Theme.tint(0.08) : Color.primary.opacity(0.04))
+                .fill(entry.hadBulkAction ? Theme.outputTint(0.08) : Color.primary.opacity(0.04))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -113,6 +113,13 @@ struct HistoryOverlay: View {
     private func header(_ entry: ArchivedStack, isSelected: Bool, isExpanded: Bool) -> some View {
         HStack(spacing: 8 * scale) {
             HStack(spacing: 8 * scale) {
+                // Estrela destacada à esquerda dos ícones: esta pilha
+                // tem outputs de ação em massa.
+                if entry.hadBulkAction {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11 * scale, weight: .semibold))
+                        .foregroundStyle(Theme.output)
+                }
                 ZStack(alignment: .leading) {
                     ForEach(Array(entry.urls.prefix(3).enumerated()), id: \.offset) { index, url in
                         Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
@@ -208,39 +215,59 @@ struct HistoryOverlay: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6 * scale) {
                         ForEach(entry.outputs, id: \.self) { url in
+                            // Mesmo racional das pilhas: ✨ à esquerda,
+                            // X à direita para apagar.
                             HStack(spacing: 5 * scale) {
-                                ThumbnailView(url: url)
-                                    .frame(width: 16 * scale, height: 16 * scale)
-                                Text(url.lastPathComponent)
-                                    .font(.system(size: 9.5 * scale))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .frame(maxWidth: 100 * scale)
-                                Image(systemName: "sparkles")
-                                    .font(.system(size: 8 * scale))
-                                    .foregroundStyle(Theme.accent)
+                                HStack(spacing: 5 * scale) {
+                                    Image(systemName: "sparkles")
+                                        .font(.system(size: 8 * scale))
+                                        .foregroundStyle(Theme.output)
+                                    ThumbnailView(url: url)
+                                        .frame(width: 16 * scale, height: 16 * scale)
+                                    Text(url.lastPathComponent)
+                                        .font(.system(size: 9.5 * scale))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .frame(maxWidth: 100 * scale)
+                                }
+                                .contentShape(Rectangle())
+                                .overlay(
+                                    ItemInteraction(
+                                        onMouseDown: { _ in },
+                                        onClickUp: { _ in },
+                                        onDoubleClick: { NSWorkspace.shared.open(url) },
+                                        dragURLs: { [url] },
+                                        menu: { simpleMenu(url) },
+                                        onHover: { hovering, rect in
+                                            if hovering {
+                                                panel.preview.hover(item: FileItem(url: url), near: rect)
+                                            } else {
+                                                panel.preview.unhover(url)
+                                            }
+                                        }
+                                    )
+                                )
+
+                                Button {
+                                    store.removeOutput(entry.id, url: url)
+                                    try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 9 * scale))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Apagar output")
                             }
                             .padding(.horizontal, 6 * scale)
                             .padding(.vertical, 3 * scale)
                             .background(
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(Theme.tint(0.12))
+                                    .fill(Theme.outputTint(0.12))
                             )
                             .overlay(
-                                ItemInteraction(
-                                    onMouseDown: { _ in },
-                                    onClickUp: { _ in },
-                                    onDoubleClick: { NSWorkspace.shared.open(url) },
-                                    dragURLs: { [url] },
-                                    menu: { simpleMenu(url) },
-                                    onHover: { hovering, rect in
-                                        if hovering {
-                                            panel.preview.hover(item: FileItem(url: url), near: rect)
-                                        } else {
-                                            panel.preview.unhover(url)
-                                        }
-                                    }
-                                )
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .strokeBorder(Theme.outputTint(0.35), lineWidth: 1)
                             )
                         }
                     }
@@ -286,6 +313,8 @@ struct HistoryOverlay: View {
 
     private func performArchived(_ id: String, entry: ArchivedStack) {
         switch id {
+        case "abrir":
+            entry.urls.forEach { NSWorkspace.shared.open($0) }
         case "pdf":
             runner.runArchived("Gerando PDF…", entry: entry) {
                 try await runner.makePDF(from: $0)

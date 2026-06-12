@@ -519,6 +519,11 @@ struct PreviewCard: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
+                    // Texto vindo do clipboard: converter em .txt na pasta.
+                    if case .text(let url) = content,
+                       url.path.contains("/Downside/Clipboard/") {
+                        SaveClipboardTextButton(url: url, scale: scale)
+                    }
                     Button(action: onClose) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 13 * scale))
@@ -724,6 +729,49 @@ struct StackGridCard: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         )
+    }
+}
+
+/// Pill no preview de texto do clipboard: salva uma cópia .txt na
+/// pasta monitorada (vira um doc "de verdade" na lista).
+struct SaveClipboardTextButton: View {
+    let url: URL
+    let scale: CGFloat
+
+    @State private var saved = false
+
+    var body: some View {
+        Button {
+            let folder = Prefs.folderURL
+            var name = url.deletingPathExtension().lastPathComponent
+            if name.isEmpty { name = "Texto" }
+            var destination = folder.appendingPathComponent("\(name).txt")
+            var counter = 2
+            while FileManager.default.fileExists(atPath: destination.path) {
+                destination = folder.appendingPathComponent("\(name) \(counter).txt")
+                counter += 1
+            }
+            if (try? FileManager.default.copyItem(at: url, to: destination)) != nil {
+                withAnimation(.easeInOut(duration: 0.15)) { saved = true }
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    withAnimation(.easeInOut(duration: 0.15)) { saved = false }
+                }
+            }
+        } label: {
+            HStack(spacing: 3 * scale) {
+                Image(systemName: saved ? "checkmark" : "arrow.down.doc")
+                    .font(.system(size: 8.5 * scale, weight: .bold))
+                Text(saved ? "Salvo" : "Salvar como .txt")
+                    .font(.system(size: 9.5 * scale, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7 * scale)
+            .padding(.vertical, 3 * scale)
+            .background(Capsule().fill(saved ? Color.green : Theme.accent))
+        }
+        .buttonStyle(.borderless)
+        .help("Criar um arquivo .txt na pasta monitorada")
     }
 }
 

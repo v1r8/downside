@@ -34,6 +34,7 @@ struct SettingsView: View {
 private struct GeneralSettingsTab: View {
     @AppStorage(PrefKey.folderPath) private var folderPath = ""
     @AppStorage(PrefKey.clipboardTimeline) private var clipboardTimeline = false
+    @AppStorage(PrefKey.cleanButtonEnabled) private var cleanButtonEnabled = true
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
@@ -57,6 +58,8 @@ private struct GeneralSettingsTab: View {
             Text("Capturas de texto, imagens e arquivos copiados aparecem junto com os itens da pasta.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Toggle("Botão de limpeza (deck de cartas)", isOn: $cleanButtonEnabled)
 
             LabeledContent("Posição do painel") {
                 Button("Restaurar padrão (canto que abriu)") {
@@ -171,7 +174,12 @@ private struct DisplaySettingsTab: View {
     @AppStorage(PrefKey.showDragHandle) private var showDragHandle = true
     @AppStorage(PrefKey.accentColorHex) private var accentHex = ""
     @AppStorage(PrefKey.accentIntensity) private var accentIntensity = 1.0
+    @AppStorage(PrefKey.outputColorHex) private var outputHex = ""
+    @AppStorage(PrefKey.outputIntensity) private var outputIntensity = 1.0
     @AppStorage(PrefKey.clipboardStyle) private var clipboardStyle = 2
+    @AppStorage(PrefKey.clipboardMarkIntensity) private var clipMarkIntensity = 1.0
+    @AppStorage(PrefKey.clipboardBarWidth) private var clipBarWidth = 2.5
+    @ObservedObject private var themeStore = ThemeStore.shared
 
     var body: some View {
         Form {
@@ -209,6 +217,39 @@ private struct DisplaySettingsTab: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                // Amostra ao vivo do resultado.
+                LabeledContent("Prévia") {
+                    HStack(spacing: 6) {
+                        Capsule().fill(Theme.tint(0.25)).frame(width: 34, height: 14)
+                        Capsule().fill(Theme.tint(0.6)).frame(width: 34, height: 14)
+                        Text("12")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(GlassCapsule(tint: 0.7))
+                    }
+                }
+            }
+
+            Section("Outputs de ações em massa") {
+                ColorPicker(
+                    "Cor dos outputs (✨ e chips)",
+                    selection: Binding(
+                        get: { Color(hex: outputHex) ?? (Color(hex: accentHex) ?? .accentColor) },
+                        set: { outputHex = $0.hexString ?? "" }
+                    ),
+                    supportsOpacity: false
+                )
+                Button("Usar a cor dos destaques") { outputHex = "" }
+                VStack(alignment: .leading) {
+                    Slider(value: $outputIntensity, in: 0.35...1.5) {
+                        Text("Intensidade")
+                    }
+                    Text("Intensidade dos outputs: \(Int(outputIntensity * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Interface") {
@@ -219,6 +260,24 @@ private struct DisplaySettingsTab: View {
                     Text("Barra lateral").tag(3)
                     Text("Degradê suave").tag(4)
                     Text("Etiqueta CLIP").tag(5)
+                }
+                VStack(alignment: .leading) {
+                    Slider(value: $clipMarkIntensity, in: 0.3...1.6) {
+                        Text("Visibilidade da marca")
+                    }
+                    Text("Marca do clipboard em \(Int(clipMarkIntensity * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if clipboardStyle == 3 {
+                    VStack(alignment: .leading) {
+                        Slider(value: $clipBarWidth, in: 2...6) {
+                            Text("Largura da barra lateral")
+                        }
+                        Text("\(String(format: "%.1f", clipBarWidth)) px")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 

@@ -35,6 +35,12 @@ struct DropStackBar: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 8 * scale) {
+                // Lixeira à ESQUERDA da seção de pilhas, durante arrastos.
+                if panel.isDraggingFromPanel || panel.externalDragActive {
+                    TrashDropTarget(scale: scale)
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+                }
+
                 ForEach(panel.stacks) { stack in
                     StackChip(
                         stack: stack,
@@ -54,12 +60,9 @@ struct DropStackBar: View {
                     .transition(.scale(scale: 0.85).combined(with: .opacity))
                 }
 
-                if panel.isDraggingFromPanel || panel.externalDragActive {
-                    if panel.stacks.count < PanelController.maxStacks {
-                        NewStackTarget(scale: scale)
-                            .transition(.scale(scale: 0.85).combined(with: .opacity))
-                    }
-                    TrashDropTarget(scale: scale)
+                if panel.isDraggingFromPanel || panel.externalDragActive,
+                   panel.stacks.count < PanelController.maxStacks {
+                    NewStackTarget(scale: scale)
                         .transition(.scale(scale: 0.85).combined(with: .opacity))
                 }
             }
@@ -129,6 +132,8 @@ struct DropStackBar: View {
                     tabMinX: tab.minX,
                     tabMaxX: tab.maxX,
                     paneTop: tab.maxY,
+                    // No fechamento o painel recolhe para dentro da aba.
+                    collapse: expanded == nil ? 1 : 0,
                     radius: 10
                 )
                 ZStack {
@@ -156,17 +161,22 @@ struct TabPaneShape: Shape {
     var tabMinX: CGFloat
     var tabMaxX: CGFloat
     var paneTop: CGFloat
+    /// 0 = painel aberto na largura toda · 1 = recolhido na largura da
+    /// aba. No fechamento as laterais retraem para DENTRO da aba, então
+    /// nunca passam sob os chips vizinhos.
+    var collapse: CGFloat = 0
     var radius: CGFloat = 10
     /// Filete côncavo onde o pescoço da aba encontra o painel —
     /// nenhum canto abrupto na junção.
     var fillet: CGFloat = 6
 
-    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
-        get { AnimatablePair(AnimatablePair(tabMinX, tabMaxX), paneTop) }
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<CGFloat, CGFloat>> {
+        get { AnimatablePair(AnimatablePair(tabMinX, tabMaxX), AnimatablePair(paneTop, collapse)) }
         set {
             tabMinX = newValue.first.first
             tabMaxX = newValue.first.second
-            paneTop = newValue.second
+            paneTop = newValue.second.first
+            collapse = newValue.second.second
         }
     }
 
@@ -175,10 +185,14 @@ struct TabPaneShape: Shape {
         let top = min(paneTop, rect.maxY)
         let minX = max(rect.minX, min(tabMinX, rect.maxX - 2 * r))
         let maxX = min(rect.maxX, max(tabMaxX, minX + 2 * r))
+        let c = max(0, min(1, collapse))
+        // Laterais do painel interpolam da largura total para a aba.
+        let paneLeft = rect.minX + (minX - rect.minX) * c
+        let paneRight = rect.maxX - (rect.maxX - maxX) * c
         // Painel ainda fechado (altura ~zero): desenha só a aba.
         let paneVisible = rect.maxY - top > 1
-        let rightFillet = paneVisible && maxX + fillet < rect.maxX - r
-        let leftFillet = paneVisible && minX - fillet > rect.minX + r
+        let rightFillet = paneVisible && maxX + fillet < paneRight - r
+        let leftFillet = paneVisible && minX - fillet > paneLeft + r
 
         var path = Path()
         path.move(to: CGPoint(x: minX, y: rect.minY + r))
@@ -199,35 +213,35 @@ struct TabPaneShape: Shape {
                     center: CGPoint(x: maxX + fillet, y: top - fillet),
                     radius: fillet, startAngle: .degrees(180), endAngle: .degrees(90), clockwise: true
                 )
-                path.addLine(to: CGPoint(x: rect.maxX - r, y: top))
+                path.addLine(to: CGPoint(x: paneRight - r, y: top))
                 path.addArc(
-                    center: CGPoint(x: rect.maxX - r, y: top + r),
+                    center: CGPoint(x: paneRight - r, y: top + r),
                     radius: r, startAngle: .degrees(270), endAngle: .degrees(0), clockwise: false
                 )
-            } else if maxX < rect.maxX - r {
+            } else if maxX < paneRight - r {
                 path.addLine(to: CGPoint(x: maxX, y: top))
-                path.addLine(to: CGPoint(x: rect.maxX - r, y: top))
+                path.addLine(to: CGPoint(x: paneRight - r, y: top))
                 path.addArc(
-                    center: CGPoint(x: rect.maxX - r, y: top + r),
+                    center: CGPoint(x: paneRight - r, y: top + r),
                     radius: r, startAngle: .degrees(270), endAngle: .degrees(0), clockwise: false
                 )
             } else {
-                path.addLine(to: CGPoint(x: rect.maxX, y: top))
+                path.addLine(to: CGPoint(x: paneRight, y: top))
             }
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
+            path.addLine(to: CGPoint(x: paneRight, y: rect.maxY - r))
             path.addArc(
-                center: CGPoint(x: rect.maxX - r, y: rect.maxY - r),
+                center: CGPoint(x: paneRight - r, y: rect.maxY - r),
                 radius: r, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false
             )
-            path.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+            path.addLine(to: CGPoint(x: paneLeft + r, y: rect.maxY))
             path.addArc(
-                center: CGPoint(x: rect.minX + r, y: rect.maxY - r),
+                center: CGPoint(x: paneLeft + r, y: rect.maxY - r),
                 radius: r, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false
             )
             if leftFillet {
-                path.addLine(to: CGPoint(x: rect.minX, y: top + r))
+                path.addLine(to: CGPoint(x: paneLeft, y: top + r))
                 path.addArc(
-                    center: CGPoint(x: rect.minX + r, y: top + r),
+                    center: CGPoint(x: paneLeft + r, y: top + r),
                     radius: r, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false
                 )
                 path.addLine(to: CGPoint(x: minX - fillet, y: top))
@@ -235,15 +249,15 @@ struct TabPaneShape: Shape {
                     center: CGPoint(x: minX - fillet, y: top - fillet),
                     radius: fillet, startAngle: .degrees(90), endAngle: .degrees(0), clockwise: true
                 )
-            } else if minX > rect.minX + r {
-                path.addLine(to: CGPoint(x: rect.minX, y: top + r))
+            } else if minX > paneLeft + r {
+                path.addLine(to: CGPoint(x: paneLeft, y: top + r))
                 path.addArc(
-                    center: CGPoint(x: rect.minX + r, y: top + r),
+                    center: CGPoint(x: paneLeft + r, y: top + r),
                     radius: r, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false
                 )
                 path.addLine(to: CGPoint(x: minX, y: top))
             } else {
-                path.addLine(to: CGPoint(x: rect.minX, y: top))
+                path.addLine(to: CGPoint(x: paneLeft, y: top))
                 path.addLine(to: CGPoint(x: minX, y: top))
             }
         } else {
@@ -596,6 +610,8 @@ private struct StackDetailContent: View {
     /// Despacha uma ação configurada pelo id.
     private func perform(_ id: String) {
         switch id {
+        case "abrir":
+            stack.urls.forEach { NSWorkspace.shared.open($0) }
         case "pdf":
             runner.run("Gerando PDF…", stack: stack, panel: panel) {
                 try await runner.makePDF(from: $0)
@@ -692,11 +708,6 @@ private struct StackDetailContent: View {
                             .font(.system(size: 10 * scale))
                             .foregroundStyle(.secondary)
                     }
-
-                    Button("Abrir todos") {
-                        stack.urls.forEach { NSWorkspace.shared.open($0) }
-                    }
-                    .font(.system(size: 10.5 * scale))
                 }
             }
             .buttonStyle(.borderless)
@@ -736,7 +747,7 @@ private struct StackDetailContent: View {
             HStack(spacing: 5 * scale) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 8 * scale))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.output)
                 ThumbnailView(url: url)
                     .frame(width: 18 * scale, height: 18 * scale)
                 Text(url.lastPathComponent)
@@ -780,11 +791,11 @@ private struct StackDetailContent: View {
         .padding(.vertical, 4 * scale)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Theme.tint(0.12))
+                .fill(Theme.outputTint(0.12))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Theme.tint(0.35), lineWidth: 1)
+                .strokeBorder(Theme.outputTint(0.35), lineWidth: 1)
         )
     }
 
@@ -861,7 +872,7 @@ private struct StackDetailContent: View {
                 if isOutput {
                     Image(systemName: "sparkles")
                         .font(.system(size: 9 * scale))
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Theme.output)
                         .help("Gerado por ação em massa")
                 }
                 Spacer(minLength: 4)
@@ -900,7 +911,7 @@ private struct StackDetailContent: View {
         .padding(.vertical, 2 * scale)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isOutput ? Theme.tint(0.1) : Color.clear)
+                .fill(isOutput ? Theme.outputTint(0.1) : Color.clear)
         )
     }
 
