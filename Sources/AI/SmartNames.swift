@@ -10,8 +10,8 @@ enum SmartNamer {
     /// custo por arquivo.)
     static func backendAvailable() async -> Bool {
         if LocalNamer.isAvailable { return true }
-        return await OllamaService.isRunning()
-            && OllamaService.hasModel(Prefs.ollamaModel)
+        guard await OllamaService.isRunning() else { return false }
+        return await OllamaService.hasModel(Prefs.ollamaModel)
     }
 
     static func name(for url: URL) async -> String? {
