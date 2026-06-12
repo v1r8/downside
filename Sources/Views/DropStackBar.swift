@@ -1019,15 +1019,15 @@ enum StackDropHandler {
             } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
                 accepted = true
                 group.enter()
-                saveImage(provider) { collect($0) }
+                saveImage(provider, done: { collect($0) })
             } else if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
                 accepted = true
                 group.enter()
-                resolveWebURL(provider) { collect($0) }
+                resolveWebURL(provider, done: { collect($0) })
             } else if provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier) {
                 accepted = true
                 group.enter()
-                saveText(provider) { collect($0) }
+                saveText(provider, done: { collect($0) })
             }
         }
 
@@ -1068,11 +1068,11 @@ enum StackDropHandler {
     }
 
     private static func saveImage(_ provider: NSItemProvider, add: @escaping (URL) -> Void) {
-        saveImage(provider) { url in
+        saveImage(provider, done: { url in
             if let url {
                 Task { @MainActor in add(url) }
             }
-        }
+        })
     }
 
     private static func saveImage(_ provider: NSItemProvider, done: @escaping (URL?) -> Void) {
@@ -1102,11 +1102,11 @@ enum StackDropHandler {
     }
 
     private static func resolveWebURL(_ provider: NSItemProvider, add: @escaping (URL) -> Void) {
-        resolveWebURL(provider) { url in
+        resolveWebURL(provider, done: { url in
             if let url {
                 Task { @MainActor in add(url) }
             }
-        }
+        })
     }
 
     private static func resolveWebURL(_ provider: NSItemProvider, done: @escaping (URL?) -> Void) {
@@ -1129,11 +1129,11 @@ enum StackDropHandler {
     }
 
     private static func saveText(_ provider: NSItemProvider, add: @escaping (URL) -> Void) {
-        saveText(provider) { url in
+        saveText(provider, done: { url in
             if let url {
                 Task { @MainActor in add(url) }
             }
-        }
+        })
     }
 
     private static func saveText(_ provider: NSItemProvider, done: @escaping (URL?) -> Void) {
