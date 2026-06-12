@@ -281,7 +281,7 @@ struct HistoryOverlay: View {
                 )
                 .rotationEffect(.degrees(-10))
                 .offset(x: -size * 0.3 * scale)
-                .zIndex(0)
+                .zIndex(Prefs.holoCardFront ? 20 : 0)
             }
         }
         .frame(width: size * 1.7 * scale, alignment: .leading)
@@ -610,6 +610,7 @@ struct HistoryOverlay: View {
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                                     .fill(Theme.outputTint(0.12))
                             )
+                            .overlay(HoloShimmer(cornerRadius: 7))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                                     .strokeBorder(Theme.outputTint(0.35), lineWidth: 1)

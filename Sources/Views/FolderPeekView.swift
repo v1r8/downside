@@ -268,22 +268,68 @@ struct FolderPeekView: View {
 
     private var header: some View {
         HStack(spacing: 9 * scale) {
-            // Toggle de itens do clipboard: folha dobrada vazada;
-            // ativa = preenchida com contorno na cor de destaque.
+
+            // Livrinho do fichário: também é alvo de drop — arraste
+            // uma pilha para cá para arquivá-la. Durante arrastos
+            // ganha a cor de destaque e um anel tracejado (como o
+            // alvo de nova pilha).
             Button {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
-                    clipboardTimeline.toggle()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    showHistory.toggle()
                 }
             } label: {
-                Image(systemName: clipboardTimeline ? "book.fill" : "book")
-                    .foregroundStyle(Color.primary)
+                Image(systemName: showHistory ? "book.fill" : "book")
                     .font(.system(size: 13 * scale))
-                .frame(width: 26 * scale, height: 26 * scale)
-                .contentShape(Rectangle())
+                    .foregroundStyle(
+                        historyDropTargeted || panel.isDraggingFromPanel || panel.externalDragActive
+                            ? Theme.accent
+                            : Color.primary
+                    )
+                    // Durante arrastos a zona se alarga em pílula;
+                    // sobre o alvo, alarga ainda mais.
+                    .frame(
+                        width: historyDropTargeted
+                            ? 58 * scale
+                            : (panel.isDraggingFromPanel || panel.externalDragActive ? 44 : 26) * scale,
+                        height: 26 * scale
+                    )
+                    .contentShape(Capsule())
             }
-            .scaleEffect(clipboardTimeline ? 1.06 : 1)
-            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: clipboardTimeline)
-            .help(clipboardTimeline ? "Ocultar itens do clipboard" : "Mostrar itens do clipboard")
+            .background(
+                Capsule()
+                    .fill(Theme.tint(historyDropTargeted ? 0.15 : 0.06))
+                    .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        Theme.accent,
+                        style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                    )
+                    .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
+            )
+            // Ampliação com mola viva; RETORNO criticamente
+            // amortecido — desliza de volta sem nenhum quique, e o
+            // espaçamento dos vizinhos acompanha a mesma curva.
+            .animation(
+                historyDropTargeted
+                    ? .spring(response: 0.28, dampingFraction: 0.74)
+                    : .spring(response: 0.45, dampingFraction: 1.0),
+                value: historyDropTargeted
+            )
+            .animation(
+                (panel.isDraggingFromPanel || panel.externalDragActive)
+                    ? .spring(response: 0.32, dampingFraction: 0.78)
+                    : .spring(response: 0.5, dampingFraction: 1.0),
+                value: panel.isDraggingFromPanel || panel.externalDragActive
+            )
+            .onDrop(of: [.fileURL], isTargeted: $historyDropTargeted) { providers in
+                StackDropHandler.collectFileURLs(providers) { urls in
+                    archiveDropped(urls)
+                }
+                return true
+            }
+            .help("Fichário de pilhas — solte uma pilha aqui para arquivar")
 
             // A busca é única (pasta, clipboard, pilhas e fichário).
             searchField
@@ -320,66 +366,23 @@ struct FolderPeekView: View {
             }
 
             Group {
-                // Livrinho do fichário: também é alvo de drop — arraste
-                // uma pilha para cá para arquivá-la. Durante arrastos
-                // ganha a cor de destaque e um anel tracejado (como o
-                // alvo de nova pilha).
+                // Toggle de itens do clipboard: folha dobrada vazada;
+                // ativa = preenchida com contorno na cor de destaque.
                 Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        showHistory.toggle()
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
+                        clipboardTimeline.toggle()
                     }
                 } label: {
-                    Image(systemName: showHistory ? "doc.fill" : "doc")
-                        .foregroundStyle(
-                            historyDropTargeted || panel.isDraggingFromPanel || panel.externalDragActive
-                                ? Theme.accent
-                                : Color.primary
-                        )
-                        // Durante arrastos a zona se alarga em pílula;
-                        // sobre o alvo, alarga ainda mais.
-                        .frame(
-                            width: historyDropTargeted
-                                ? 58 * scale
-                                : (panel.isDraggingFromPanel || panel.externalDragActive ? 44 : 26) * scale,
-                            height: 26 * scale
-                        )
-                        .contentShape(Capsule())
+                    Image(systemName: clipboardTimeline ? "doc.fill" : "doc")
+                        .foregroundStyle(Color.primary)
+                        .font(.system(size: 13 * scale))
+                    .frame(width: 26 * scale, height: 26 * scale)
+                    .contentShape(Rectangle())
                 }
-                .background(
-                    Capsule()
-                        .fill(Theme.tint(historyDropTargeted ? 0.15 : 0.06))
-                        .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder(
-                            Theme.accent,
-                            style: StrokeStyle(lineWidth: 1, dash: [3, 3])
-                        )
-                        .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
-                )
-                // Ampliação com mola viva; RETORNO criticamente
-                // amortecido — desliza de volta sem nenhum quique, e o
-                // espaçamento dos vizinhos acompanha a mesma curva.
-                .animation(
-                    historyDropTargeted
-                        ? .spring(response: 0.28, dampingFraction: 0.74)
-                        : .spring(response: 0.45, dampingFraction: 1.0),
-                    value: historyDropTargeted
-                )
-                .animation(
-                    (panel.isDraggingFromPanel || panel.externalDragActive)
-                        ? .spring(response: 0.32, dampingFraction: 0.78)
-                        : .spring(response: 0.5, dampingFraction: 1.0),
-                    value: panel.isDraggingFromPanel || panel.externalDragActive
-                )
-                .onDrop(of: [.fileURL], isTargeted: $historyDropTargeted) { providers in
-                    StackDropHandler.collectFileURLs(providers) { urls in
-                        archiveDropped(urls)
-                    }
-                    return true
-                }
-                .help("Fichário de pilhas — solte uma pilha aqui para arquivar")
+                .scaleEffect(clipboardTimeline ? 1.06 : 1)
+                .animation(.spring(response: 0.28, dampingFraction: 0.7), value: clipboardTimeline)
+                .help(clipboardTimeline ? "Ocultar itens do clipboard" : "Mostrar itens do clipboard")
+
                 Button {
                     panel.isPinned.toggle()
                 } label: {

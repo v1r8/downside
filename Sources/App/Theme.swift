@@ -141,6 +141,33 @@ struct HoloCardBadge: View {
     }
 }
 
+/// Brilho holográfico sutil para sobrepor chips/fundos (outputs).
+struct HoloShimmer: View {
+    var cornerRadius: CGFloat = 8
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.05)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let phase = CGFloat(t.truncatingRemainder(dividingBy: 2.8) / 2.8)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            .clear,
+                            Color.white.opacity(0.28),
+                            Color.cyan.opacity(0.18),
+                            Color.purple.opacity(0.16),
+                            .clear,
+                        ],
+                        startPoint: UnitPoint(x: phase * 2.4 - 1.4, y: 0.2),
+                        endPoint: UnitPoint(x: phase * 2.4 - 0.4, y: 0.8)
+                    )
+                )
+                .allowsHitTesting(false)
+        }
+    }
+}
+
 /// Efeito mágico no lugar do título enquanto a IA nomeia a ficha.
 struct MagicNamePlaceholder: View {
     let scale: CGFloat

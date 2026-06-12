@@ -327,7 +327,7 @@ private struct StackChip: View {
                         HoloCardBadge(width: 13 * scale, height: 18 * scale)
                             .rotationEffect(.degrees(-10))
                             .offset(x: -6 * scale)
-                            .zIndex(0)
+                            .zIndex(Prefs.holoCardFront ? 20 : 0)
                     }
                 }
                 .frame(width: 36 * scale, alignment: .leading)
@@ -817,6 +817,7 @@ private struct StackDetailContent: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Theme.outputTint(0.12))
         )
+        .overlay(HoloShimmer(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(Theme.outputTint(0.35), lineWidth: 1)

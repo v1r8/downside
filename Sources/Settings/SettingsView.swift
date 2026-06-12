@@ -307,6 +307,7 @@ private struct StackSettingsTab: View {
     @AppStorage(PrefKey.archiveHoverPreview) private var archiveHoverPreview = true
     @AppStorage(PrefKey.historyLayout) private var historyLayout = 1
     @AppStorage(PrefKey.bulkBadgeStyle) private var bulkBadgeStyle = 1
+    @AppStorage(PrefKey.holoCardFront) private var holoCardFront = false
     @ObservedObject private var config = BulkActionConfigStore.shared
 
     private var archiveHoverBinding: Binding<Bool> {
@@ -344,10 +345,16 @@ private struct StackSettingsTab: View {
                     Text("Estantes por mês").tag(6)
                 }
                 Picker("Indicador de ações em massa", selection: $bulkBadgeStyle) {
-                    Text("Carta no fim do deck").tag(1)
+                    Text("Carta holográfica no deck").tag(1)
                     Text("Estrela à esquerda").tag(2)
                     Text("Ponto no contador/título").tag(3)
                     Text("Nenhum").tag(4)
+                }
+                if bulkBadgeStyle == 1 {
+                    Picker("Posição da carta", selection: $holoCardFront) {
+                        Text("Atrás do deck").tag(false)
+                        Text("À frente do deck").tag(true)
+                    }
                 }
             }
 

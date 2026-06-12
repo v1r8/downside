@@ -144,6 +144,7 @@ enum PrefKey {
     static let clipboardBarWidth = "clipboardBarWidth"
     static let stackTitleDetail = "stackTitleDetail"
     static let bulkBadgeStyle = "bulkBadgeStyle"
+    static let holoCardFront = "holoCardFront"
     static let historyLayout = "historyLayout"
     static let ollamaModel = "ollamaModel"
     static let panelWidth = "panelWidth"
@@ -306,6 +307,11 @@ enum Prefs {
     static var bulkBadgeStyle: Int {
         let value = UserDefaults.standard.integer(forKey: PrefKey.bulkBadgeStyle)
         return (1...4).contains(value) ? value : 1
+    }
+
+    /// Carta holográfica à frente do deck (false = atrás).
+    static var holoCardFront: Bool {
+        UserDefaults.standard.object(forKey: PrefKey.holoCardFront) as? Bool ?? false
     }
 
     /// Organização do fichário (HistoryLayout).
