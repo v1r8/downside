@@ -5,6 +5,7 @@ struct FileCell: View {
     let item: FileItem
     let isSelected: Bool
     var scale: CGFloat = 1
+    var isHovered: Bool = false
 
     var body: some View {
         VStack(spacing: 5 * scale) {
@@ -23,10 +24,15 @@ struct FileCell: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
+                .fill(
+                    isSelected
+                        ? Color.accentColor.opacity(0.22)
+                        : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
+                )
         )
         .contentShape(Rectangle())
         .animation(.easeOut(duration: 0.1), value: isSelected)
+        .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 }
 
@@ -35,6 +41,7 @@ struct FileRow: View {
     let item: FileItem
     let isSelected: Bool
     var scale: CGFloat = 1
+    var isHovered: Bool = false
 
     private static let sizeFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -70,9 +77,14 @@ struct FileRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
+                .fill(
+                    isSelected
+                        ? Color.accentColor.opacity(0.22)
+                        : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
+                )
         )
         .contentShape(Rectangle())
+        .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 
     private var detail: String {
@@ -90,6 +102,7 @@ struct MinimalFileRow: View {
     let item: FileItem
     let isSelected: Bool
     var scale: CGFloat = 1
+    var isHovered: Bool = false
 
     var body: some View {
         Text(item.name)
@@ -103,9 +116,14 @@ struct MinimalFileRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 Capsule()
-                    .fill(isSelected ? Color.accentColor.opacity(0.45) : Color.clear)
+                    .fill(
+                        isSelected
+                            ? Color.accentColor.opacity(0.45)
+                            : (isHovered ? Color.white.opacity(0.09) : Color.clear)
+                    )
             )
             .contentShape(Rectangle())
+            .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 }
 

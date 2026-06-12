@@ -30,11 +30,9 @@ enum PreviewContent {
         }
     }
 
-    /// O player de áudio fica na tela até o usuário fechar no X.
-    var isSticky: Bool {
-        if case .audio = self { return true }
-        return false
-    }
+    /// Nenhum conteúdo nasce fixado: o player de áudio só fixa quando
+    /// o usuário dá play (aí sim sobrevive até o X).
+    var isSticky: Bool { false }
 
     /// Categoria usada para o ajuste de tamanho por tipo de arquivo.
     var sizeCategory: PreviewCategory {
@@ -157,6 +155,12 @@ final class PreviewPanel: NSPanel {
 /// do atraso configurado. Conteúdos interativos (PDF, áudio, texto,
 /// tabela, evento) aceitam mouse; o player de áudio permanece na tela
 /// até ser fechado no X.
+extension Notification.Name {
+    /// Postada quando o player do preview de áudio começa a tocar —
+    /// só então o preview fixa na tela.
+    static let audioPreviewStartedPlaying = Notification.Name("downside.audioPlay")
+}
+
 @MainActor
 final class PreviewController {
     private var panel: PreviewPanel?
@@ -166,6 +170,25 @@ final class PreviewController {
     private(set) var isShowing = false
     private(set) var isSticky = false
     private var mouseInsideCard = false
+
+    init() {
+        NotificationCenter.default.addObserver(
+            forName: .audioPreviewStartedPlaying,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.audioDidStartPlaying() }
+        }
+    }
+
+    /// Play no áudio: agora sim o preview fixa (arrastável, fecha no X).
+    private func audioDidStartPlaying() {
+        guard isShowing else { return }
+        isSticky = true
+        panel?.isMovableByWindowBackground = true
+        dismissTask?.cancel()
+        dismissTask = nil
+    }
 
     /// Posição "encaixada" (ao lado do painel) do preview fixado e
     /// estado do vai-e-vem quando o painel fecha/abre.
@@ -201,6 +224,62 @@ final class PreviewController {
         showTask = nil
         currentURL = nil
         scheduleDismiss()
+    }
+
+    // MARK: - Preview global de pilha
+
+    private func stackKey(_ id: UUID) -> URL {
+        URL(string: "downside-stack://\(id.uuidString)")!
+    }
+
+    /// Pairar sobre uma pilha: mostra todos os documentos dela de uma
+    /// vez, num cartão ao lado do painel (nunca por cima).
+    func hoverStack(_ id: UUID, urls: [URL], near rect: NSRect) {
+        guard Prefs.hoverPreviewEnabled, !isSticky, !urls.isEmpty else { return }
+        dismissTask?.cancel()
+        dismissTask = nil
+
+        let key = stackKey(id)
+        guard currentURL != key else { return }
+        showTask?.cancel()
+        currentURL = key
+
+        let delay = isShowing ? 0.1 : max(Prefs.hoverPreviewDelay, 0.6)
+        showTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            self.presentStack(key: key, urls: urls, near: rect)
+        }
+    }
+
+    func unhoverStack(_ id: UUID) {
+        unhover(stackKey(id))
+    }
+
+    private func presentStack(key: URL, urls: [URL], near rect: NSRect) {
+        guard currentURL == key else { return }
+
+        let hosting = NSHostingView(
+            rootView: StackGridCard(urls: urls, scale: Prefs.uiScale)
+        )
+        let size = hosting.fittingSize
+
+        let panel = ensurePanel()
+        panel.contentView = hosting
+        panel.ignoresMouseEvents = true
+        isSticky = false
+        panel.isMovableByWindowBackground = false
+        parked = false
+
+        guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(rect) })
+            ?? NSScreen.main else { return }
+        let origin = origin(for: size, near: rect, on: screen)
+        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+
+        panel.alphaValue = 0
+        panel.orderFront(nil)
+        isShowing = true
+        fadeIn(panel)
     }
 
     /// Fecha, exceto o player de áudio fixado (que só sai pelo X).
@@ -276,8 +355,7 @@ final class PreviewController {
         panel.contentView = hosting
         panel.ignoresMouseEvents = !content.isInteractive
         isSticky = content.isSticky
-        // O player fixado pode ser arrastado por qualquer ponto.
-        panel.isMovableByWindowBackground = content.isSticky
+        panel.isMovableByWindowBackground = false
         parked = false
 
         guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(rect) })
@@ -566,6 +644,63 @@ struct PreviewCard: View {
     }
 }
 
+/// Cartão com todos os documentos de uma pilha de uma vez, em grade de
+/// tamanho dinâmico (colunas conforme a quantidade).
+struct StackGridCard: View {
+    let urls: [URL]
+    let scale: CGFloat
+
+    private var shown: [URL] { Array(urls.prefix(12)) }
+
+    private var columns: Int {
+        switch urls.count {
+        case ...2: return max(1, urls.count)
+        case 3...4: return 2
+        case 5...9: return 3
+        default: return 4
+        }
+    }
+
+    private var rows: [[URL]] {
+        stride(from: 0, to: shown.count, by: columns).map {
+            Array(shown[$0..<min($0 + columns, shown.count)])
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 10 * scale) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(alignment: .top, spacing: 10 * scale) {
+                    ForEach(row, id: \.self) { url in
+                        VStack(spacing: 4 * scale) {
+                            ThumbnailView(url: url)
+                                .frame(width: 96 * scale, height: 96 * scale)
+                            Text(url.lastPathComponent)
+                                .font(.system(size: 9.5 * scale))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(width: 100 * scale)
+                        }
+                    }
+                }
+            }
+
+            if urls.count > shown.count {
+                Text("+ \(urls.count - shown.count) itens")
+                    .font(.system(size: 10 * scale))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14 * scale)
+        .background(VisualEffectView(material: .popover))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
 // MARK: - Conteúdos interativos
 
 struct PDFKitView: NSViewRepresentable {
@@ -618,6 +753,7 @@ final class AudioPlayerModel: ObservableObject {
             player.rate = rate
             isPlaying = true
             startTimer()
+            NotificationCenter.default.post(name: .audioPreviewStartedPlaying, object: nil)
         }
     }
 

@@ -24,6 +24,8 @@ struct FolderPeekView: View {
     @State private var itemFrames: [URL: CGRect] = [:]
     @State private var rubberBand: CGRect?
     @State private var searchText = ""
+    @State private var hoveredItem: URL?
+    @State private var scrolledDown = false
 
     private let gridSpace = "downside.grid"
 
@@ -218,36 +220,64 @@ struct FolderPeekView: View {
         if displayedItems.isEmpty {
             emptyState
         } else {
-            ScrollView {
-                ZStack(alignment: .topLeading) {
-                    // LazyVStack: o rodapé de "carregar mais" só é
-                    // instanciado (e dispara) quando realmente entra na
-                    // área visível, ao rolar até o fim.
-                    LazyVStack(spacing: 0) {
-                        layout
-                        if monitor.isTruncated {
-                            LoadMoreFooter(scale: scale) {
-                                monitor.increaseLimit()
+            ScrollViewReader { scrollProxy in
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollView {
+                        ZStack(alignment: .topLeading) {
+                            // LazyVStack: o rodapé de "carregar mais" só é
+                            // instanciado (e dispara) quando realmente entra
+                            // na área visível, ao rolar até o fim.
+                            LazyVStack(spacing: 0) {
+                                layout
+                                if monitor.isTruncated {
+                                    LoadMoreFooter(scale: scale) {
+                                        monitor.increaseLimit()
+                                    }
+                                }
+                            }
+                            .padding(mode == .grid ? 10 * scale : 12 * scale)
+                            .background(emptyAreaCatcher)
+
+                            if let rect = rubberBand {
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(Color.accentColor.opacity(0.14))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
+                                    )
+                                    .frame(width: rect.width, height: rect.height)
+                                    .offset(x: rect.minX, y: rect.minY)
+                                    .allowsHitTesting(false)
                             }
                         }
+                        .id("downside.top")
+                        .coordinateSpace(name: gridSpace)
+                        .simultaneousGesture(rubberBandGesture)
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ScrollOffsetKey.self,
+                                    value: proxy.frame(in: .named("downside.viewport")).minY
+                                )
+                            }
+                        )
                     }
-                    .padding(mode == .grid ? 10 * scale : 12 * scale)
-                    .background(emptyAreaCatcher)
+                    .coordinateSpace(name: "downside.viewport")
+                    .onPreferenceChange(ScrollOffsetKey.self) { minY in
+                        scrolledDown = minY < -250
+                    }
 
-                    if let rect = rubberBand {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.accentColor.opacity(0.14))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 2)
-                                    .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
-                            )
-                            .frame(width: rect.width, height: rect.height)
-                            .offset(x: rect.minX, y: rect.minY)
-                            .allowsHitTesting(false)
+                    if scrolledDown {
+                        BackToTopButton(scale: scale) {
+                            withAnimation(.easeInOut(duration: 0.35)) {
+                                scrollProxy.scrollTo("downside.top", anchor: .top)
+                            }
+                        }
+                        .padding(12 * scale)
+                        .transition(.scale(scale: 0.7).combined(with: .opacity))
                     }
                 }
-                .coordinateSpace(name: gridSpace)
-                .simultaneousGesture(rubberBandGesture)
+                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: scrolledDown)
             }
             .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
                 itemFrames = frames
@@ -265,7 +295,12 @@ struct FolderPeekView: View {
             ) {
                 ForEach(displayedItems) { item in
                     interactive(item) {
-                        FileCell(item: item, isSelected: selection.contains(item.url), scale: scale)
+                        FileCell(
+                            item: item,
+                            isSelected: selection.contains(item.url),
+                            scale: scale,
+                            isHovered: hoveredItem == item.url
+                        )
                     }
                 }
             }
@@ -274,7 +309,12 @@ struct FolderPeekView: View {
                 ForEach(displayedItems) { item in
                     HStack(spacing: 6 * scale) {
                         interactive(item) {
-                            FileRow(item: item, isSelected: selection.contains(item.url), scale: scale)
+                            FileRow(
+                                item: item,
+                                isSelected: selection.contains(item.url),
+                                scale: scale,
+                                isHovered: hoveredItem == item.url
+                            )
                         }
                         if item.url.pathExtension.lowercased() == "ics" {
                             CalendarAddButton(url: item.url, scale: scale)
@@ -286,7 +326,12 @@ struct FolderPeekView: View {
             LazyVStack(alignment: .leading, spacing: 1) {
                 ForEach(displayedItems) { item in
                     interactive(item) {
-                        MinimalFileRow(item: item, isSelected: selection.contains(item.url), scale: scale)
+                        MinimalFileRow(
+                            item: item,
+                            isSelected: selection.contains(item.url),
+                            scale: scale,
+                            isHovered: hoveredItem == item.url
+                        )
                     }
                 }
             }
@@ -318,8 +363,10 @@ struct FolderPeekView: View {
                     menu: { contextMenu(for: item) },
                     onHover: { hovering, rect in
                         if hovering {
+                            hoveredItem = item.url
                             panel.preview.hover(item: item, near: rect)
                         } else {
+                            if hoveredItem == item.url { hoveredItem = nil }
                             panel.preview.unhover(item.url)
                         }
                     },
@@ -511,6 +558,53 @@ private struct LoadMoreFooter: View {
                 onComplete()
             }
         }
+    }
+}
+
+private struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// Botão circular de voltar ao topo, em vidro (liquid glass no Tahoe,
+/// material translúcido como fallback).
+private struct BackToTopButton: View {
+    let scale: CGFloat
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.up")
+                .font(.system(size: 13 * scale, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 34 * scale, height: 34 * scale)
+        }
+        .buttonStyle(.borderless)
+        .background(glassCircle)
+        .help("Voltar ao topo")
+    }
+
+    @ViewBuilder
+    private var glassCircle: some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            Color.clear.glassEffect(.regular, in: Circle())
+        } else {
+            legacyGlass
+        }
+        #else
+        legacyGlass
+        #endif
+    }
+
+    private var legacyGlass: some View {
+        Circle()
+            .fill(.ultraThinMaterial)
+            .overlay(Circle().strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
+            .shadow(color: .black.opacity(0.2), radius: 5, y: 2)
     }
 }
 

@@ -64,7 +64,10 @@ struct DropStackBar: View {
                     toggle(stack.id)
                 }
                 .id(stack.id)
-                .transition(.opacity)
+                .transition(.asymmetric(
+                    insertion: .opacity,
+                    removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
+                ))
             }
         }
         .background(unifiedTabBackground)
@@ -75,7 +78,6 @@ struct DropStackBar: View {
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.stacks)
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.isDraggingFromPanel)
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: panel.externalDragActive)
-        .animation(.spring(response: 0.36, dampingFraction: 0.82), value: expanded)
         .onChange(of: panel.stacks) { _, stacks in
             if let id = expanded, !stacks.contains(where: { $0.id == id }) {
                 expanded = nil
@@ -85,10 +87,22 @@ struct DropStackBar: View {
 
     private func toggle(_ id: UUID) {
         if expanded == id {
-            expanded = nil
-        } else {
-            expanded = id
+            // Fechamento: mola mais suave, cartas voltam com calma.
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) {
+                expanded = nil
+            }
+        } else if expanded != nil {
+            // Troca de aba: crossfade curto e ágil, sem empilhar molas.
             lastDetailID = id
+            withAnimation(.easeInOut(duration: 0.2)) {
+                expanded = id
+            }
+        } else {
+            // Abertura: mola viva.
+            lastDetailID = id
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
+                expanded = id
+            }
         }
     }
 
@@ -131,6 +145,9 @@ struct TabPaneShape: Shape {
     var tabMaxX: CGFloat
     var paneTop: CGFloat
     var radius: CGFloat = 10
+    /// Filete côncavo onde o pescoço da aba encontra o painel —
+    /// nenhum canto abrupto na junção.
+    var fillet: CGFloat = 6
 
     var animatableData: AnimatablePair<CGFloat, CGFloat> {
         get { AnimatablePair(tabMinX, tabMaxX) }
@@ -147,6 +164,8 @@ struct TabPaneShape: Shape {
         let maxX = min(rect.maxX, max(tabMaxX, minX + 2 * r))
         // Painel ainda fechado (altura ~zero): desenha só a aba.
         let paneVisible = rect.maxY - top > 1
+        let rightFillet = paneVisible && maxX + fillet < rect.maxX - r
+        let leftFillet = paneVisible && minX - fillet > rect.minX + r
 
         var path = Path()
         path.move(to: CGPoint(x: minX, y: rect.minY + r))
@@ -159,10 +178,21 @@ struct TabPaneShape: Shape {
             center: CGPoint(x: maxX - r, y: rect.minY + r),
             radius: r, startAngle: .degrees(270), endAngle: .degrees(0), clockwise: false
         )
-        path.addLine(to: CGPoint(x: maxX, y: top))
 
         if paneVisible {
-            if maxX < rect.maxX - r {
+            if rightFillet {
+                path.addLine(to: CGPoint(x: maxX, y: top - fillet))
+                path.addArc(
+                    center: CGPoint(x: maxX + fillet, y: top - fillet),
+                    radius: fillet, startAngle: .degrees(180), endAngle: .degrees(90), clockwise: true
+                )
+                path.addLine(to: CGPoint(x: rect.maxX - r, y: top))
+                path.addArc(
+                    center: CGPoint(x: rect.maxX - r, y: top + r),
+                    radius: r, startAngle: .degrees(270), endAngle: .degrees(0), clockwise: false
+                )
+            } else if maxX < rect.maxX - r {
+                path.addLine(to: CGPoint(x: maxX, y: top))
                 path.addLine(to: CGPoint(x: rect.maxX - r, y: top))
                 path.addArc(
                     center: CGPoint(x: rect.maxX - r, y: top + r),
@@ -181,7 +211,18 @@ struct TabPaneShape: Shape {
                 center: CGPoint(x: rect.minX + r, y: rect.maxY - r),
                 radius: r, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false
             )
-            if minX > rect.minX + r {
+            if leftFillet {
+                path.addLine(to: CGPoint(x: rect.minX, y: top + r))
+                path.addArc(
+                    center: CGPoint(x: rect.minX + r, y: top + r),
+                    radius: r, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false
+                )
+                path.addLine(to: CGPoint(x: minX - fillet, y: top))
+                path.addArc(
+                    center: CGPoint(x: minX - fillet, y: top - fillet),
+                    radius: fillet, startAngle: .degrees(90), endAngle: .degrees(0), clockwise: true
+                )
+            } else if minX > rect.minX + r {
                 path.addLine(to: CGPoint(x: rect.minX, y: top + r))
                 path.addArc(
                     center: CGPoint(x: rect.minX + r, y: top + r),
@@ -193,6 +234,7 @@ struct TabPaneShape: Shape {
                 path.addLine(to: CGPoint(x: minX, y: top))
             }
         } else {
+            path.addLine(to: CGPoint(x: maxX, y: top))
             path.addLine(to: CGPoint(x: minX, y: top))
         }
 
@@ -227,12 +269,15 @@ private struct StackChip: View {
                     .opacity(isActive ? 0.45 : 1)
                     .frame(width: 36 * scale, alignment: .leading)
             } else {
+                // Leque na ordem de inserção: o primeiro adicionado é a
+                // carta da frente — espelhando a ordem da lista.
                 ZStack(alignment: .leading) {
-                    ForEach(Array(stack.urls.suffix(3).enumerated()), id: \.element) { index, url in
+                    ForEach(Array(stack.urls.prefix(3).enumerated()), id: \.element) { index, url in
                         ThumbnailView(url: url)
                             .frame(width: 22 * scale, height: 22 * scale)
                             .padding(.leading, CGFloat(index) * 6 * scale)
                             .rotationEffect(.degrees(Double(index) * 3 - 3))
+                            .zIndex(Double(3 - index))
                             .matchedGeometryEffect(
                                 id: "\(stack.id)-\(url.path)",
                                 in: deck,
@@ -257,8 +302,8 @@ private struct StackChip: View {
         .padding(.horizontal, 8 * scale)
         .padding(.top, 5 * scale)
         // A aba ativa desce até o painel; as outras ficam com um respiro
-        // acima dele (nada de sobreposição visual).
-        .padding(.bottom, (isActive ? 9 : 5) * scale)
+        // claro de 8 px acima dele (nada de sobreposição visual).
+        .padding(.bottom, (isActive ? 13 : 5) * scale)
         .frame(maxWidth: .infinity)
         .background(chipBackground)
         .scaleEffect(targeted ? 1.05 : 1)
@@ -271,7 +316,15 @@ private struct StackChip: View {
                 onDoubleClick: onToggleExpand,
                 dragURLs: { stack.urls },
                 menu: { contextMenu() },
-                onHover: { _, _ in },
+                onHover: { hovering, _ in
+                    // Pairar no chip mostra o preview de TODOS os docs
+                    // da pilha, ao lado do painel.
+                    if hovering {
+                        panel.hoverStackPreview(stack)
+                    } else {
+                        panel.unhoverStackPreview(stack.id)
+                    }
+                },
                 onDragStarted: { panel.isDraggingFromPanel = true },
                 onDragEnded: { panel.isDraggingFromPanel = false }
             )
@@ -499,12 +552,18 @@ private struct StackDetailContent: View {
             .contentShape(Rectangle())
             .overlay(
                 ItemInteraction(
-                    onMouseDown: { _ in },
+                    onMouseDown: { _ in panel.preview.dismiss() },
                     onClickUp: { _ in },
                     onDoubleClick: { NSWorkspace.shared.open(url) },
                     dragURLs: { [url] },
                     menu: { rowMenu(url) },
-                    onHover: { _, _ in },
+                    onHover: { hovering, rect in
+                        if hovering {
+                            panel.preview.hover(item: FileItem(url: url), near: rect)
+                        } else {
+                            panel.preview.unhover(url)
+                        }
+                    },
                     onDragStarted: { panel.isDraggingFromPanel = true },
                     onDragEnded: { panel.isDraggingFromPanel = false }
                 )

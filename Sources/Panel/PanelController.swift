@@ -237,6 +237,17 @@ final class PanelController: ObservableObject {
         stacks.removeAll { $0.urls.isEmpty }
     }
 
+    /// Preview global da pilha, posicionado em relação ao PAINEL (nunca
+    /// por cima dele).
+    func hoverStackPreview(_ stack: FileStack) {
+        guard let frame = panel?.frame else { return }
+        preview.hoverStack(stack.id, urls: stack.urls, near: frame)
+    }
+
+    func unhoverStackPreview(_ id: UUID) {
+        preview.unhoverStack(id)
+    }
+
     // MARK: - Internals
 
     private func preferredCorner() -> HotCorner {
