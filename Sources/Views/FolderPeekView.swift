@@ -14,6 +14,7 @@ import AppKit
 struct FolderPeekView: View {
     @EnvironmentObject private var monitor: FolderMonitor
     @EnvironmentObject private var panel: PanelController
+    @EnvironmentObject private var clipboard: ClipboardMonitor
     @Environment(\.openSettings) private var openSettings
 
     @AppStorage(PrefKey.viewMode) private var viewModeRaw = ViewMode.grid.rawValue
@@ -26,6 +27,11 @@ struct FolderPeekView: View {
     @State private var searchText = ""
     @State private var hoveredItem: URL?
     @State private var scrolledDown = false
+    @State private var showHistory = false
+    @State private var confirmClean = false
+    @State private var cleaning: [(url: URL, from: CGPoint)]?
+
+    @AppStorage(PrefKey.clipboardTimeline) private var clipboardTimeline = false
 
     private let gridSpace = "downside.grid"
 
@@ -45,10 +51,23 @@ struct FolderPeekView: View {
         return query.isEmpty ? nil : query
     }
 
-    /// Itens visíveis: todos, ou o resultado da busca.
+    /// Itens visíveis: pasta (+ clipboard, se habilitado), filtrados
+    /// pela busca.
     private var displayedItems: [FileItem] {
-        guard let query = parsedQuery else { return monitor.items }
-        return monitor.items.filter { NaturalSearch.matches($0, query: query) }
+        var base = monitor.items
+        if clipboardTimeline, !clipboard.items.isEmpty {
+            let known = Set(base.map(\.url))
+            base = (base + clipboard.items.filter { !known.contains($0.url) })
+                .sorted { $0.date > $1.date }
+        }
+        guard let query = parsedQuery else { return base }
+        return base.filter { NaturalSearch.matches($0, query: query) }
+    }
+
+    /// Itens da pasta com mais de 30 dias — alvo da limpeza.
+    private var cleanableItems: [FileItem] {
+        let cutoff = Date().addingTimeInterval(-30 * 86_400)
+        return monitor.items.filter { $0.date < cutoff }
     }
 
     var body: some View {
@@ -82,7 +101,17 @@ struct FolderPeekView: View {
             if mode != .minimal {
                 Divider().opacity(0.4)
             }
-            content
+            if showHistory {
+                HistoryOverlay(scale: scale)
+            } else {
+                content
+            }
+        }
+        .alert("Limpar a pasta?", isPresented: $confirmClean) {
+            Button("Mover para o Lixo", role: .destructive) { startClean() }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("\(cleanableItems.count) itens com mais de 30 dias serão movidos para o Lixo (recuperáveis)." )
         }
         .background {
             if mode != .minimal {
@@ -163,6 +192,26 @@ struct FolderPeekView: View {
                 .help("Arraste para reposicionar — o painel encaixa na grade da tela e memoriza")
 
             Group {
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        showHistory.toggle()
+                    }
+                } label: {
+                    Image(systemName: showHistory ? "books.vertical.fill" : "books.vertical")
+                }
+                .help("Fichário de pilhas")
+
+                Button {
+                    guard cleaning == nil else { return }
+                    if cleanableItems.isEmpty {
+                        NSSound.beep()
+                    } else {
+                        confirmClean = true
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .help("Limpar: mover itens com +30 dias para o Lixo")
                 Button {
                     panel.isPinned.toggle()
                 } label: {
@@ -249,6 +298,16 @@ struct FolderPeekView: View {
                                     .offset(x: rect.minX, y: rect.minY)
                                     .allowsHitTesting(false)
                             }
+
+                            if let cleaning {
+                                CleanDeckOverlay(
+                                    cards: cleaning,
+                                    center: deckCenter,
+                                    scale: scale
+                                ) {
+                                    finishClean()
+                                }
+                            }
                         }
                         .id("downside.top")
                         .coordinateSpace(name: gridSpace)
@@ -318,6 +377,8 @@ struct FolderPeekView: View {
                         }
                         if item.url.pathExtension.lowercased() == "ics" {
                             CalendarAddButton(url: item.url, scale: scale)
+                        } else if item.url.pathExtension.lowercased() == "dmg" {
+                            DMGActionButton(url: item.url, scale: scale)
                         }
                     }
                 }
@@ -425,6 +486,39 @@ struct FolderPeekView: View {
                 .minimalShadow(mode == .minimal)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Limpeza com deck
+
+    private var deckCenter: CGPoint {
+        let union = itemFrames.values.reduce(nil as CGRect?) { partial, frame in
+            partial?.union(frame) ?? frame
+        }
+        guard let union else { return CGPoint(x: 220, y: 160) }
+        return CGPoint(x: union.midX, y: min(union.minY + 170, union.midY))
+    }
+
+    private func startClean() {
+        let victims = cleanableItems
+        guard !victims.isEmpty else { return }
+        let visible = victims.compactMap { item -> (url: URL, from: CGPoint)? in
+            guard let frame = itemFrames[item.url] else { return nil }
+            return (url: item.url, from: CGPoint(x: frame.midX, y: frame.midY))
+        }
+        if visible.isEmpty {
+            finishClean()
+        } else {
+            cleaning = Array(visible.prefix(12))
+        }
+    }
+
+    private func finishClean() {
+        for item in cleanableItems {
+            try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+        }
+        selection.removeAll()
+        cleaning = nil
+        monitor.reload()
     }
 
     // MARK: - Seleção (semântica do Finder)

@@ -10,6 +10,7 @@ final class AppState {
     let panelController: PanelController
     let hotCorner = HotCornerMonitor()
     let updater = UpdaterManager()
+    let clipboard = ClipboardMonitor()
 
     private var lastFolderPath: String
 
@@ -37,6 +38,7 @@ final class AppState {
             }
         }
         hotCorner.start()
+        clipboard.start()
 
         NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,

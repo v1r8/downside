@@ -235,7 +235,7 @@ final class PreviewController {
     /// Pairar sobre uma pilha: mostra todos os documentos dela de uma
     /// vez, num cartão ao lado do painel (nunca por cima).
     func hoverStack(_ id: UUID, urls: [URL], near rect: NSRect) {
-        guard Prefs.hoverPreviewEnabled, !isSticky, !urls.isEmpty else { return }
+        guard Prefs.stackPreviewEnabled, !isSticky, !urls.isEmpty else { return }
         dismissTask?.cancel()
         dismissTask = nil
 
@@ -244,7 +244,7 @@ final class PreviewController {
         showTask?.cancel()
         currentURL = key
 
-        let delay = isShowing ? 0.1 : max(Prefs.hoverPreviewDelay, 0.6)
+        let delay = isShowing ? 0.1 : Prefs.stackPreviewDelay
         showTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard let self, !Task.isCancelled else { return }

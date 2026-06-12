@@ -302,8 +302,8 @@ private struct StackChip: View {
         .padding(.horizontal, 8 * scale)
         .padding(.top, 5 * scale)
         // A aba ativa desce até o painel; as outras ficam com um respiro
-        // claro de 8 px acima dele (nada de sobreposição visual).
-        .padding(.bottom, (isActive ? 13 : 5) * scale)
+        // proporcional ao espaçamento lateral entre os chips.
+        .padding(.bottom, (isActive ? 17 : 5) * scale)
         .frame(maxWidth: .infinity)
         .background(chipBackground)
         .scaleEffect(targeted ? 1.05 : 1)
@@ -477,6 +477,7 @@ private struct StackDetailContent: View {
     var onClose: () -> Void
 
     @State private var targeted = false
+    @StateObject private var runner = BulkActionRunner()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -492,12 +493,65 @@ private struct StackDetailContent: View {
 
             Divider().opacity(0.3)
 
-            HStack {
+            HStack(spacing: 8 * scale) {
+                Menu {
+                    Button("Gerar PDF da pilha") {
+                        runner.run("Gerando PDF…", stack: stack, panel: panel) {
+                            try await runner.makePDF(from: $0)
+                        }
+                    }
+                    Button("Baixar links da pilha") {
+                        runner.run("Baixando links…", stack: stack, panel: panel) {
+                            try await runner.downloadLinks(from: $0)
+                        }
+                    }
+                    Divider()
+                    Button("Resumir com IA") {
+                        runner.run("Resumindo…", stack: stack, panel: panel) {
+                            try await runner.summarize($0)
+                        }
+                    }
+                    .disabled(!ClaudeService.hasKey)
+                    Button("Palavras-chave com IA") {
+                        runner.run("Caracterizando…", stack: stack, panel: panel) {
+                            try await runner.keywords($0)
+                        }
+                    }
+                    .disabled(!ClaudeService.hasKey)
+                    if !ClaudeService.hasKey {
+                        Text("IA: configure a chave em Configurações → IA")
+                    }
+                    Divider()
+                    Button("Arquivar no fichário") {
+                        let snapshot = stack
+                        Task { @MainActor in
+                            let title = await ClaudeService.stackTitle(for: snapshot.urls)
+                            StackHistoryStore.shared.archive(snapshot, title: title)
+                            panel.clearStack(snapshot.id)
+                        }
+                        onClose()
+                    }
+                } label: {
+                    Label("Ações", systemImage: "wand.and.stars")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                if let label = runner.runningLabel {
+                    ProgressView().controlSize(.mini)
+                    Text(label)
+                        .foregroundStyle(.secondary)
+                } else if let message = runner.message {
+                    Text(message)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
                 Button("Abrir todos") {
                     stack.urls.forEach { NSWorkspace.shared.open($0) }
                 }
-                Spacer()
-                Button("Limpar pilha", role: .destructive) {
+                Button("Limpar", role: .destructive) {
                     panel.clearStack(stack.id)
                     onClose()
                 }
@@ -534,7 +588,8 @@ private struct StackDetailContent: View {
     }
 
     private func row(_ url: URL) -> some View {
-        HStack(spacing: 6 * scale) {
+        let isOutput = stack.outputs.contains(url)
+        return HStack(spacing: 6 * scale) {
             HStack(spacing: 8 * scale) {
                 ThumbnailView(url: url)
                     .frame(width: 26 * scale, height: 26 * scale)
@@ -547,6 +602,12 @@ private struct StackDetailContent: View {
                     .font(.system(size: 11.5 * scale))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if isOutput {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 9 * scale))
+                        .foregroundStyle(Color.accentColor)
+                        .help("Gerado por ação em massa")
+                }
                 Spacer(minLength: 4)
             }
             .contentShape(Rectangle())
@@ -581,6 +642,10 @@ private struct StackDetailContent: View {
         }
         .padding(.horizontal, 6 * scale)
         .padding(.vertical, 2 * scale)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isOutput ? Color.accentColor.opacity(0.1) : Color.clear)
+        )
     }
 
     private func rowMenu(_ url: URL) -> NSMenu {

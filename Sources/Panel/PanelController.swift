@@ -4,10 +4,15 @@ import SwiftUI
 struct FileStack: Identifiable, Equatable {
     let id: UUID
     var urls: [URL]
+    /// Arquivos gerados por ações em massa (destacados na lista).
+    var outputs: Set<URL>
+    var hadBulkAction: Bool
 
-    init(id: UUID = UUID(), urls: [URL] = []) {
+    init(id: UUID = UUID(), urls: [URL] = [], outputs: Set<URL> = [], hadBulkAction: Bool = false) {
         self.id = id
         self.urls = urls
+        self.outputs = outputs
+        self.hadBulkAction = hadBulkAction
     }
 }
 
@@ -237,6 +242,39 @@ final class PanelController: ObservableObject {
         stacks.removeAll { $0.urls.isEmpty }
     }
 
+    /// Registra um arquivo gerado por ação em massa na pilha.
+    func addOutput(_ url: URL, to id: UUID) {
+        guard let index = stacks.firstIndex(where: { $0.id == id }) else { return }
+        if !stacks[index].urls.contains(url) {
+            stacks[index].urls.append(url)
+        }
+        stacks[index].outputs.insert(url)
+        stacks[index].hadBulkAction = true
+    }
+
+    /// Adiciona à pilha mais recente (ou cria uma) — usado pelo
+    /// "documento ativo → pilha".
+    func addToCurrentStack(_ url: URL) {
+        if let last = stacks.last {
+            addToStack(last.id, url: url)
+        } else {
+            addToStack(nil, url: url)
+        }
+    }
+
+    /// Recoloca uma pilha arquivada do fichário como pilha ativa.
+    func restoreArchived(_ archived: ArchivedStack) {
+        guard stacks.count < Self.maxStacks else {
+            NSSound.beep()
+            return
+        }
+        stacks.append(FileStack(
+            urls: archived.urls,
+            outputs: Set(archived.outputs),
+            hadBulkAction: archived.hadBulkAction
+        ))
+    }
+
     /// Preview global da pilha, posicionado em relação ao PAINEL (nunca
     /// por cima dele).
     func hoverStackPreview(_ stack: FileStack) {
@@ -296,6 +334,7 @@ final class PanelController: ObservableObject {
         let root = FolderPeekView()
             .environmentObject(folderMonitor)
             .environmentObject(self)
+            .environmentObject(AppState.shared.clipboard)
         panel.contentView = NSHostingView(rootView: root)
 
         self.panel = panel

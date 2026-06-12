@@ -22,6 +22,16 @@ struct MenuBarContent: View {
         }
         .keyboardShortcut("d", modifiers: [.command, .shift])
 
+        Button("Copiar documento ativo para pilha") {
+            if let url = ActiveDocument.grab() {
+                AppState.shared.panelController.addToCurrentStack(url)
+                AppState.shared.showPanel()
+            } else {
+                NSSound.beep()
+            }
+        }
+        .keyboardShortcut("d", modifiers: [.command, .option])
+
         Divider()
 
         Button("Verificar atualizações…") {

@@ -127,7 +127,11 @@ enum PrefKey {
     static let hoverPreviewEnabled = "hoverPreviewEnabled"
     static let hoverPreviewDelay = "hoverPreviewDelay"
     static let hoverPreviewSize = "hoverPreviewSize"
+    static let stackPreviewEnabled = "stackPreviewEnabled"
+    static let stackPreviewDelay = "stackPreviewDelay"
     static let stackReplaceDelay = "stackReplaceDelay"
+    static let clipboardTimeline = "clipboardTimeline"
+    static let claudeAPIKey = "claudeAPIKey"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -225,6 +229,40 @@ enum Prefs {
         let value = UserDefaults.standard.double(forKey: PrefKey.stackReplaceDelay)
         guard value >= 1, value <= 6 else { return 3.0 }
         return value
+    }
+
+    /// Preview global (todos os docs da pilha) ao pairar no chip.
+    static var stackPreviewEnabled: Bool {
+        UserDefaults.standard.object(forKey: PrefKey.stackPreviewEnabled) as? Bool ?? true
+    }
+
+    static var stackPreviewDelay: TimeInterval {
+        let value = UserDefaults.standard.double(forKey: PrefKey.stackPreviewDelay)
+        guard value >= 0.3, value <= 3 else { return 1.0 }
+        return value
+    }
+
+    /// Inclui capturas do clipboard na linha do tempo da pasta.
+    static var clipboardTimelineEnabled: Bool {
+        UserDefaults.standard.object(forKey: PrefKey.clipboardTimeline) as? Bool ?? false
+    }
+
+    /// Chave da API do Claude para os recursos de IA (opcional).
+    static var claudeAPIKey: String? {
+        let key = UserDefaults.standard.string(forKey: PrefKey.claudeAPIKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (key?.isEmpty == false) ? key : nil
+    }
+
+    /// Cofre do app em Application Support.
+    static func supportDirectory(_ subfolder: String) -> URL {
+        let base = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("Downside/\(subfolder)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
 
     /// Ajuste fino de tamanho do preview por categoria de arquivo,
