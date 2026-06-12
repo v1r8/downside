@@ -211,6 +211,30 @@ struct FolderPeekView: View {
         return Array(groups.prefix(12))
     }
 
+    /// Onde mais um doc da linha do tempo vive (pilhas/fichário) —
+    /// vira a mensagem "aparece também em…" e dá relevância.
+    private func extraPlaces(for url: URL) -> [String] {
+        var places: [String] = []
+        if panel.stacks.contains(where: { $0.urls.contains(url) }) {
+            places.append("pilha provisória")
+        }
+        if let entry = history.archived.first(where: { $0.paths.contains(url.path) }) {
+            places.append(entry.title.isEmpty ? "fichário" : "fichário “\(entry.title)”")
+        }
+        return places
+    }
+
+    /// Itens da busca ordenados por relevância: quem aparece em mais
+    /// lugares (linha do tempo + pilha + fichário) sobe para o topo.
+    private var orderedSearchItems: [FileItem] {
+        displayedItems.enumerated().sorted { a, b in
+            let pa = extraPlaces(for: a.element.url).count
+            let pb = extraPlaces(for: b.element.url).count
+            if pa != pb { return pa > pb }
+            return a.offset < b.offset
+        }.map(\.element)
+    }
+
     /// Resultados de busca: um pouco de cada lugar (linha do tempo,
     /// pilhas provisórias e fichário), com cabeçalhos claros de ONDE
     /// cada doc está e botão para expandir além dos primeiros.
@@ -221,8 +245,26 @@ struct FolderPeekView: View {
                 "Na linha do tempo", icon: "clock",
                 count: displayedItems.count, first: true
             )
-            ForEach(limitedItems(displayedItems, section: "pasta", limit: 8)) { item in
-                listRow(item)
+            ForEach(limitedItems(orderedSearchItems, section: "pasta", limit: 8)) { item in
+                VStack(alignment: .leading, spacing: 0) {
+                    listRow(item)
+                    // Doc que também vive em pilha/fichário é mais
+                    // relevante — sobe e ganha a indicação do lugar.
+                    let places = extraPlaces(for: item.url)
+                    if !places.isEmpty {
+                        HStack(spacing: 3 * scale) {
+                            Image(systemName: "mappin.and.ellipse")
+                                .font(.system(size: 8 * scale))
+                                .foregroundStyle(Theme.accent)
+                            Text("aparece também: \(places.joined(separator: " · "))")
+                                .font(.system(size: 9.5 * scale))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .padding(.leading, 44 * scale)
+                        .padding(.bottom, 3 * scale)
+                    }
+                }
             }
             showAllButton(section: "pasta", total: displayedItems.count, limit: 8)
         }

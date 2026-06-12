@@ -311,14 +311,55 @@ enum NaturalSearch {
         if !query.nameTerms.isEmpty {
             let name = normalize(item.name)
             for term in query.nameTerms {
-                let inName = name.contains(term)
-                let inContent = content?.contains(term) ?? false
-                if !inName && !inContent {
-                    return false
+                if name.contains(term) { continue }
+                if content?.contains(term) == true { continue }
+                // Tolerância a typos: o termo pode estar escrito com
+                // 1–2 erros de digitação no nome ou no conteúdo.
+                if fuzzyContains(name, term: term) { continue }
+                if let content, fuzzyContains(String(content.prefix(4_000)), term: term) {
+                    continue
                 }
+                return false
             }
         }
         return true
+    }
+
+    // MARK: - Tolerância a typos
+
+    /// O termo aparece (com até 1–2 erros, conforme o tamanho) em
+    /// alguma palavra do texto?
+    static func fuzzyContains(_ haystack: String, term: String) -> Bool {
+        guard term.count >= 4 else { return false }
+        let limit = term.count >= 8 ? 2 : 1
+        let target = Array(term)
+        for word in haystack.split(whereSeparator: { !$0.isLetter && !$0.isNumber }) {
+            guard abs(word.count - term.count) <= limit else { continue }
+            if editDistance(Array(word), target, limit: limit) <= limit {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Distância de edição com teto — sai cedo quando o melhor da
+    /// linha já estoura o limite.
+    private static func editDistance(_ a: [Character], _ b: [Character], limit: Int) -> Int {
+        guard !a.isEmpty, !b.isEmpty else { return max(a.count, b.count) }
+        var previous = Array(0...b.count)
+        for i in 1...a.count {
+            var current = [Int](repeating: 0, count: b.count + 1)
+            current[0] = i
+            var rowMin = current[0]
+            for j in 1...b.count {
+                let cost = a[i - 1] == b[j - 1] ? 0 : 1
+                current[j] = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+                rowMin = min(rowMin, current[j])
+            }
+            if rowMin > limit { return limit + 1 }
+            previous = current
+        }
+        return previous[b.count]
     }
 
     static func kind(of item: FileItem) -> FileKind? {
