@@ -246,6 +246,7 @@ private struct StackSettingsTab: View {
     @AppStorage(PrefKey.stackPreviewEnabled) private var stackPreviewEnabled = true
     @AppStorage(PrefKey.stackPreviewDelay) private var stackPreviewDelay = 1.0
     @AppStorage(PrefKey.archiveHoverPreview) private var archiveHoverPreview = true
+    @ObservedObject private var config = BulkActionConfigStore.shared
 
     private var archiveHoverBinding: Binding<Bool> {
         $archiveHoverPreview
@@ -271,8 +272,71 @@ private struct StackSettingsTab: View {
                 }
                 Toggle("Também nas fichas do fichário", isOn: archiveHoverBinding)
             }
+
+            Section("Ações em massa") {
+                ForEach(config.items) { item in
+                    BulkActionConfigRow(item: item)
+                }
+                Button("Restaurar padrão") {
+                    config.reset()
+                }
+            }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Linha editável de uma ação em massa: ícone, texto, ordem e ativação.
+private struct BulkActionConfigRow: View {
+    @ObservedObject private var config = BulkActionConfigStore.shared
+    let item: BulkActionItem
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(BulkActionConfigStore.iconChoices, id: \.self) { icon in
+                    Button {
+                        update { $0.icon = icon }
+                    } label: {
+                        Label(icon, systemImage: icon)
+                    }
+                }
+            } label: {
+                Image(systemName: item.icon)
+                    .frame(width: 20)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            TextField("Nome", text: Binding(
+                get: { item.title },
+                set: { value in update { $0.title = value } }
+            ))
+            .textFieldStyle(.roundedBorder)
+
+            Button { config.move(item.id, up: true) } label: {
+                Image(systemName: "chevron.up")
+            }
+            Button { config.move(item.id, up: false) } label: {
+                Image(systemName: "chevron.down")
+            }
+
+            Toggle("", isOn: Binding(
+                get: { item.enabled },
+                set: { value in update { $0.enabled = value } }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func update(_ change: (inout BulkActionItem) -> Void) {
+        guard let index = config.items.firstIndex(where: { $0.id == item.id }) else { return }
+        var copy = config.items[index]
+        change(&copy)
+        config.items[index] = copy
     }
 }
 

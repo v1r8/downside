@@ -6,6 +6,8 @@ import AppKit
 /// pilhas provisórias, renomeáveis (manual ou por IA), com
 /// multi-seleção. A busca usa a barra principal do painel.
 struct HistoryOverlay: View {
+    @ObservedObject private var themeStore = ThemeStore.shared
+
     @ObservedObject private var store = StackHistoryStore.shared
     @EnvironmentObject private var panel: PanelController
     let scale: CGFloat
@@ -15,6 +17,8 @@ struct HistoryOverlay: View {
     @State private var expandedEntry: UUID?
     @State private var renamingEntry: UUID?
     @State private var renameText = ""
+    @StateObject private var runner = BulkActionRunner()
+    @ObservedObject private var actionConfig = BulkActionConfigStore.shared
 
     private var filtered: [ArchivedStack] {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespaces)
@@ -178,16 +182,6 @@ struct HistoryOverlay: View {
             Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                 .font(.system(size: 8 * scale, weight: .semibold))
                 .foregroundStyle(.secondary)
-
-            Button {
-                store.delete(entry.id)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 10 * scale))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.borderless)
-            .help("Apagar do fichário")
         }
         .padding(.horizontal, 8 * scale)
         .padding(.vertical, 5 * scale)
@@ -254,8 +248,65 @@ struct HistoryOverlay: View {
                     .padding(.vertical, 4 * scale)
                 }
             }
+
+            // Mesmas ações em massa da pilha expandida — os outputs são
+            // anexados à ficha (e ela ganha o fundo destacado).
+            Divider().opacity(0.3)
+            HStack(spacing: 6 * scale) {
+                if let label = runner.runningLabel {
+                    ProgressView().controlSize(.mini)
+                    Text(label)
+                        .font(.system(size: 10 * scale))
+                        .foregroundStyle(.secondary)
+                } else {
+                    HorizontalWheelScroller {
+                        HStack(spacing: 6 * scale) {
+                            ForEach(actionConfig.items.filter { $0.enabled && $0.id != "arquivar" }) { item in
+                                BulkActionPill(item: item, scale: scale) {
+                                    performArchived(item.id, entry: entry)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 2 * scale)
+                    }
+                    .frame(height: 24 * scale)
+
+                    if let message = runner.message {
+                        Text(message)
+                            .font(.system(size: 10 * scale))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 8 * scale)
+            .padding(.vertical, 4 * scale)
         }
         .padding(.vertical, 4 * scale)
+    }
+
+    private func performArchived(_ id: String, entry: ArchivedStack) {
+        switch id {
+        case "pdf":
+            runner.runArchived("Gerando PDF…", entry: entry) {
+                try await runner.makePDF(from: $0)
+            }
+        case "links":
+            runner.runArchived("Baixando…", entry: entry) {
+                try await runner.downloadLinks(from: $0)
+            }
+        case "resumo":
+            guard ClaudeService.hasKey else { return }
+            runner.runArchived("Resumindo…", entry: entry) {
+                try await runner.summarize($0)
+            }
+        case "chaves":
+            guard ClaudeService.hasKey else { return }
+            runner.runArchived("Caracterizando…", entry: entry) {
+                try await runner.keywords($0)
+            }
+        default:
+            break
+        }
     }
 
     private func fileRow(_ url: URL, entry: ArchivedStack) -> some View {

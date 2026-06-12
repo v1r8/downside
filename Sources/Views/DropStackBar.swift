@@ -12,15 +12,16 @@ private let barSpace = "downside.stackbar"
 /// arredondados). Abrir revela o conteúdo crescendo para baixo; trocar
 /// de pilha desliza a "corcova" da aba e troca o conteúdo, sem fechar.
 struct DropStackBar: View {
+    @ObservedObject private var themeStore = ThemeStore.shared
+
     @EnvironmentObject private var panel: PanelController
     let scale: CGFloat
 
     @State private var expanded: UUID?
     /// Mantém a forma de fundo durante a animação de fechamento.
     @State private var lastDetailID: UUID?
-    /// Aba em fechamento: mantém o pescoço esticado até o fade acabar,
-    /// para a borda do painel não cruzar os chips vizinhos.
-    @State private var closingID: UUID?
+    /// Debounce: cliques frenéticos não empilham transações.
+    @State private var lastToggle = Date.distantPast
     @State private var chipFrames: [UUID: CGRect] = [:]
     /// Namespace do "deck de cartas": os ícones viajam entre o leque do
     /// chip e as linhas da lista expandida.
@@ -39,7 +40,6 @@ struct DropStackBar: View {
                         stack: stack,
                         scale: scale,
                         isActive: expanded == stack.id,
-                        isClosing: closingID == stack.id,
                         deck: deck,
                         onToggleExpand: { toggle(stack.id) }
                     )
@@ -54,9 +54,12 @@ struct DropStackBar: View {
                     .transition(.scale(scale: 0.85).combined(with: .opacity))
                 }
 
-                if panel.isDraggingFromPanel || panel.externalDragActive,
-                   panel.stacks.count < PanelController.maxStacks {
-                    NewStackTarget(scale: scale)
+                if panel.isDraggingFromPanel || panel.externalDragActive {
+                    if panel.stacks.count < PanelController.maxStacks {
+                        NewStackTarget(scale: scale)
+                            .transition(.scale(scale: 0.85).combined(with: .opacity))
+                    }
+                    TrashDropTarget(scale: scale)
                         .transition(.scale(scale: 0.85).combined(with: .opacity))
                 }
             }
@@ -90,17 +93,15 @@ struct DropStackBar: View {
     }
 
     private func toggle(_ id: UUID) {
+        // Ignora rajadas de cliques no meio de uma transição.
+        guard Date().timeIntervalSince(lastToggle) > 0.18 else { return }
+        lastToggle = Date()
+
         if expanded == id {
-            // Fechamento: mola mais suave, cartas voltam com calma.
-            closingID = id
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) {
+            // Fechamento: UMA transação só — altura, pescoço da aba,
+            // fade da forma e voo das cartas juntos, sem fase intermediária.
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
                 expanded = nil
-            }
-            Task {
-                try? await Task.sleep(nanoseconds: 520_000_000)
-                if closingID == id {
-                    withAnimation(.easeOut(duration: 0.18)) { closingID = nil }
-                }
             }
         } else if expanded != nil {
             // Troca de aba: crossfade curto e ágil, sem empilhar molas.
@@ -160,11 +161,12 @@ struct TabPaneShape: Shape {
     /// nenhum canto abrupto na junção.
     var fillet: CGFloat = 6
 
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(tabMinX, tabMaxX) }
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
+        get { AnimatablePair(AnimatablePair(tabMinX, tabMaxX), paneTop) }
         set {
-            tabMinX = newValue.first
-            tabMaxX = newValue.second
+            tabMinX = newValue.first.first
+            tabMaxX = newValue.first.second
+            paneTop = newValue.second
         }
     }
 
@@ -263,7 +265,6 @@ private struct StackChip: View {
     let stack: FileStack
     let scale: CGFloat
     let isActive: Bool
-    let isClosing: Bool
     let deck: Namespace.ID
     let onToggleExpand: () -> Void
 
@@ -315,9 +316,10 @@ private struct StackChip: View {
         }
         .padding(.horizontal, 8 * scale)
         .padding(.top, 5 * scale)
-        // A aba ativa (ou em fechamento) desce até o painel; as outras
-        // ficam com respiro proporcional ao espaçamento lateral.
-        .padding(.bottom, (isActive || isClosing ? 17 : 5) * scale)
+        // A aba ativa desce até o painel; as outras ficam com respiro
+        // proporcional ao espaçamento lateral. O encolhimento anima na
+        // mesma transação do fechamento (paneTop da forma é animável).
+        .padding(.bottom, (isActive ? 17 : 5) * scale)
         .frame(maxWidth: .infinity)
         .background(chipBackground)
         .scaleEffect(targeted ? 1.05 : 1)
@@ -479,6 +481,103 @@ private struct NewStackTarget: View {
     }
 }
 
+/// Pílula de ação em massa, com texto completo (configurável).
+struct BulkActionPill: View {
+    let item: BulkActionItem
+    let scale: CGFloat
+    var action: () -> Void
+
+    private var needsKey: Bool {
+        (item.id == "resumo" || item.id == "chaves") && !ClaudeService.hasKey
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3 * scale) {
+                Image(systemName: item.icon)
+                    .font(.system(size: 9 * scale, weight: .semibold))
+                Text(item.title)
+                    .font(.system(size: 9.5 * scale, weight: .semibold))
+                    .fixedSize()
+            }
+            .padding(.horizontal, 7 * scale)
+            .padding(.vertical, 3.5 * scale)
+            .background(
+                Capsule().fill(Color.primary.opacity(needsKey ? 0.05 : 0.08))
+            )
+            .overlay(
+                Capsule().strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+            )
+            .foregroundStyle(needsKey ? Color.secondary.opacity(0.5) : Color.primary)
+        }
+        .buttonStyle(.borderless)
+        .disabled(needsKey)
+        .help(needsKey ? "Configure a chave da API em Configurações → IA" : item.title)
+    }
+}
+
+/// Lixeira de arrasto: aparece ao lado de "Nova pilha" durante drags.
+/// Solte arquivos para mandá-los ao Lixo; uma pilha ativa é liberada e
+/// uma ficha do fichário é apagada do histórico (arquivos preservados).
+private struct TrashDropTarget: View {
+    @EnvironmentObject private var panel: PanelController
+    let scale: CGFloat
+
+    @State private var targeted = false
+
+    var body: some View {
+        HStack(spacing: 5 * scale) {
+            Image(systemName: "trash")
+            Text("Lixo")
+        }
+        .font(.system(size: 11 * scale))
+        .foregroundStyle(targeted ? Color.red : Color.secondary)
+        .padding(.horizontal, 10 * scale)
+        .padding(.vertical, 9 * scale)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(targeted ? Color.red.opacity(0.12) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(
+                    targeted ? Color.red : Color.secondary.opacity(0.4),
+                    style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                )
+        )
+        .fixedSize()
+        .scaleEffect(targeted ? 1.06 : 1)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: targeted)
+        .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
+            StackDropHandler.collectFileURLs(providers) { urls in
+                handleTrashDrop(urls)
+            }
+            return true
+        }
+        .help("Solte para mover ao Lixo")
+    }
+
+    @MainActor
+    private func handleTrashDrop(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let dropped = Set(urls)
+
+        // Ficha do fichário? Apaga só a ficha (os arquivos ficam).
+        if let entry = StackHistoryStore.shared.archived.first(where: { Set($0.urls) == dropped }) {
+            StackHistoryStore.shared.delete(entry.id)
+            return
+        }
+        // Pilha ativa? Libera a pilha e manda os arquivos ao Lixo.
+        if let stack = AppState.shared.panelController.stacks.first(where: { Set($0.urls) == dropped }) {
+            AppState.shared.panelController.clearStack(stack.id)
+        }
+        for url in urls {
+            try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        }
+        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+    }
+}
+
 /// Conteúdo do painel da aba: as "cartas" pousam aqui vindas do leque
 /// do chip (matched geometry). Também é alvo de drop, com o mesmo
 /// highlight azul dos chips. Sem fundo próprio — a forma unificada da
@@ -492,6 +591,41 @@ private struct StackDetailContent: View {
 
     @State private var targeted = false
     @StateObject private var runner = BulkActionRunner()
+    @ObservedObject private var actionConfig = BulkActionConfigStore.shared
+
+    /// Despacha uma ação configurada pelo id.
+    private func perform(_ id: String) {
+        switch id {
+        case "pdf":
+            runner.run("Gerando PDF…", stack: stack, panel: panel) {
+                try await runner.makePDF(from: $0)
+            }
+        case "links":
+            runner.run("Baixando…", stack: stack, panel: panel) {
+                try await runner.downloadLinks(from: $0)
+            }
+        case "resumo":
+            guard ClaudeService.hasKey else { return }
+            runner.run("Resumindo…", stack: stack, panel: panel) {
+                try await runner.summarize($0)
+            }
+        case "chaves":
+            guard ClaudeService.hasKey else { return }
+            runner.run("Caracterizando…", stack: stack, panel: panel) {
+                try await runner.keywords($0)
+            }
+        case "arquivar":
+            let snapshot = stack
+            Task { @MainActor in
+                let title = await ClaudeService.stackTitle(for: snapshot.urls)
+                StackHistoryStore.shared.archive(snapshot, title: title)
+                panel.clearStack(snapshot.id)
+            }
+            onClose()
+        default:
+            break
+        }
+    }
 
     private var originals: [URL] {
         stack.urls.filter { !stack.outputs.contains($0) }
@@ -530,56 +664,40 @@ private struct StackDetailContent: View {
 
             Divider().opacity(0.3)
 
-            // Pílulas de ação no espírito do deck — sem menu escondido.
+            // Pílulas de ação com texto completo, configuráveis nas
+            // Configurações → Pilhas; rolagem horizontal (a roda
+            // vertical também rola, sempre com movimento horizontal).
             HStack(spacing: 6 * scale) {
                 if let label = runner.runningLabel {
                     ProgressView().controlSize(.mini)
                     Text(label)
                         .font(.system(size: 10 * scale))
                         .foregroundStyle(.secondary)
+                    Spacer()
                 } else {
-                    actionPill("doc.richtext", "PDF", help: "Gerar um PDF único com a pilha") {
-                        runner.run("Gerando PDF…", stack: stack, panel: panel) {
-                            try await runner.makePDF(from: $0)
+                    HorizontalWheelScroller {
+                        HStack(spacing: 6 * scale) {
+                            ForEach(actionConfig.items.filter(\.enabled)) { item in
+                                BulkActionPill(item: item, scale: scale) {
+                                    perform(item.id)
+                                }
+                            }
                         }
+                        .padding(.horizontal, 2 * scale)
                     }
-                    actionPill("link", "Links", help: "Baixar os links encontrados na pilha") {
-                        runner.run("Baixando…", stack: stack, panel: panel) {
-                            try await runner.downloadLinks(from: $0)
-                        }
-                    }
-                    actionPill("text.alignleft", "Resumo", help: "Resumir com IA", disabled: !ClaudeService.hasKey) {
-                        runner.run("Resumindo…", stack: stack, panel: panel) {
-                            try await runner.summarize($0)
-                        }
-                    }
-                    actionPill("tag", "Chaves", help: "Palavras-chave com IA", disabled: !ClaudeService.hasKey) {
-                        runner.run("Caracterizando…", stack: stack, panel: panel) {
-                            try await runner.keywords($0)
-                        }
-                    }
-                    actionPill("book", "Arquivar", help: "Guardar no fichário e liberar a pilha") {
-                        let snapshot = stack
-                        Task { @MainActor in
-                            let title = await ClaudeService.stackTitle(for: snapshot.urls)
-                            StackHistoryStore.shared.archive(snapshot, title: title)
-                            panel.clearStack(snapshot.id)
-                        }
-                        onClose()
-                    }
+                    .frame(height: 24 * scale)
+
                     if let message = runner.message {
                         Text(message)
                             .font(.system(size: 10 * scale))
                             .foregroundStyle(.secondary)
                     }
-                }
 
-                Spacer()
-
-                Button("Abrir todos") {
-                    stack.urls.forEach { NSWorkspace.shared.open($0) }
+                    Button("Abrir todos") {
+                        stack.urls.forEach { NSWorkspace.shared.open($0) }
+                    }
+                    .font(.system(size: 10.5 * scale))
                 }
-                .font(.system(size: 10.5 * scale))
             }
             .buttonStyle(.borderless)
             .padding(.horizontal, 8 * scale)
@@ -611,49 +729,52 @@ private struct StackDetailContent: View {
         )
     }
 
-    private func actionPill(
-        _ icon: String,
-        _ title: String,
-        help: String,
-        disabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 3 * scale) {
-                Image(systemName: icon)
-                    .font(.system(size: 9 * scale, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 9.5 * scale, weight: .semibold))
-            }
-            .padding(.horizontal, 7 * scale)
-            .padding(.vertical, 3.5 * scale)
-            .background(
-                Capsule().fill(disabled ? Color.primary.opacity(0.05) : Color.primary.opacity(0.08))
-            )
-            .overlay(
-                Capsule().strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
-            )
-            .foregroundStyle(disabled ? Color.secondary.opacity(0.5) : Color.primary)
-        }
-        .buttonStyle(.borderless)
-        .disabled(disabled)
-        .help(disabled ? "Configure a chave da API em Configurações → IA" : help)
-    }
-
-    /// Mini-chip de output, no estilo das pilhas: arrastável, com
-    /// preview no hover e menu de reaplicar/remover.
+    /// Mini-chip de output: ✨ à esquerda, X à direita para apagar;
+    /// arrastável, com preview no hover e menu de reaplicar.
     private func outputChip(_ url: URL) -> some View {
         HStack(spacing: 5 * scale) {
-            ThumbnailView(url: url)
-                .frame(width: 18 * scale, height: 18 * scale)
-            Text(url.lastPathComponent)
-                .font(.system(size: 10 * scale))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 110 * scale)
-            Image(systemName: "sparkles")
-                .font(.system(size: 8 * scale))
-                .foregroundStyle(Theme.accent)
+            HStack(spacing: 5 * scale) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 8 * scale))
+                    .foregroundStyle(Theme.accent)
+                ThumbnailView(url: url)
+                    .frame(width: 18 * scale, height: 18 * scale)
+                Text(url.lastPathComponent)
+                    .font(.system(size: 10 * scale))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 110 * scale)
+            }
+            .contentShape(Rectangle())
+            .overlay(
+                ItemInteraction(
+                    onMouseDown: { _ in panel.preview.dismiss() },
+                    onClickUp: { _ in },
+                    onDoubleClick: { NSWorkspace.shared.open(url) },
+                    dragURLs: { [url] },
+                    menu: { outputMenu(url) },
+                    onHover: { hovering, rect in
+                        if hovering {
+                            panel.preview.hover(item: FileItem(url: url), near: rect)
+                        } else {
+                            panel.preview.unhover(url)
+                        }
+                    },
+                    onDragStarted: { panel.isDraggingFromPanel = true },
+                    onDragEnded: { panel.isDraggingFromPanel = false }
+                )
+            )
+
+            Button {
+                panel.removeFromStack(stack.id, url: url)
+                try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 9 * scale))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Apagar output")
         }
         .padding(.horizontal, 7 * scale)
         .padding(.vertical, 4 * scale)
@@ -664,24 +785,6 @@ private struct StackDetailContent: View {
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(Theme.tint(0.35), lineWidth: 1)
-        )
-        .overlay(
-            ItemInteraction(
-                onMouseDown: { _ in panel.preview.dismiss() },
-                onClickUp: { _ in },
-                onDoubleClick: { NSWorkspace.shared.open(url) },
-                dragURLs: { [url] },
-                menu: { outputMenu(url) },
-                onHover: { hovering, rect in
-                    if hovering {
-                        panel.preview.hover(item: FileItem(url: url), near: rect)
-                    } else {
-                        panel.preview.unhover(url)
-                    }
-                },
-                onDragStarted: { panel.isDraggingFromPanel = true },
-                onDragEnded: { panel.isDraggingFromPanel = false }
-            )
         )
     }
 

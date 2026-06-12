@@ -43,6 +43,35 @@ final class BulkActionRunner: ObservableObject {
         }
     }
 
+    /// Variante para fichas do fichário: os outputs são anexados à
+    /// própria ficha arquivada.
+    func runArchived(
+        _ label: String,
+        entry: ArchivedStack,
+        action: @escaping (FileStack) async throws -> [URL]
+    ) {
+        guard runningLabel == nil else { return }
+        runningLabel = label
+        message = nil
+        Task {
+            do {
+                let stack = FileStack(
+                    urls: entry.urls,
+                    outputs: Set(entry.outputs),
+                    hadBulkAction: entry.hadBulkAction
+                )
+                let outputs = try await action(stack)
+                StackHistoryStore.shared.appendOutputs(entry.id, urls: outputs)
+                message = outputs.isEmpty ? "Nada para processar" : "Concluído ✓"
+            } catch {
+                message = "Não foi possível concluir"
+            }
+            runningLabel = nil
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            message = nil
+        }
+    }
+
     // MARK: - Ações
 
     /// Um PDF único com todas as cartas: PDFs são incorporados página a

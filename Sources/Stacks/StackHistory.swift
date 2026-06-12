@@ -54,6 +54,22 @@ final class StackHistoryStore: ObservableObject {
         save()
     }
 
+    /// Anexa outputs de uma ação em massa a uma ficha arquivada.
+    func appendOutputs(_ id: UUID, urls: [URL]) {
+        guard !urls.isEmpty,
+              let index = archived.firstIndex(where: { $0.id == id }) else { return }
+        for url in urls {
+            if !archived[index].paths.contains(url.path) {
+                archived[index].paths.append(url.path)
+            }
+            if !archived[index].outputPaths.contains(url.path) {
+                archived[index].outputPaths.append(url.path)
+            }
+        }
+        archived[index].hadBulkAction = true
+        save()
+    }
+
     private func load() {
         guard let data = try? Data(contentsOf: storeURL),
               let decoded = try? JSONDecoder().decode([ArchivedStack].self, from: data)

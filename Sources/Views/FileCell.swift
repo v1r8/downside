@@ -2,6 +2,8 @@ import SwiftUI
 import AppKit
 
 struct FileCell: View {
+    @ObservedObject private var themeStore = ThemeStore.shared
+
     let item: FileItem
     let isSelected: Bool
     var scale: CGFloat = 1

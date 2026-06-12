@@ -57,19 +57,34 @@ final class ClipboardMonitor: ObservableObject {
                 if let data = try? PropertyListSerialization.data(
                     fromPropertyList: plist, format: .xml, options: 0
                 ) {
-                    let url = destination(name: "Link — \(sanitize(link.host ?? "web"))", ext: "webloc")
+                    let name = "Link — \(sanitize(link.host ?? "web"))"
+                    let url = destination(name: name, ext: "webloc")
                     if (try? data.write(to: url)) != nil {
-                        add([FileItem(url: url)])
+                        add([cleanNamedItem(url: url, name: name)])
                     }
                 }
             } else {
+                // Item de TEXTO: nome é o próprio conteúdo (sem ".txt"
+                // aparente — arrastar cola como texto).
                 let preview = sanitize(String(trimmed.prefix(28)))
-                let url = destination(name: preview.isEmpty ? "Texto \(stamp())" : preview, ext: "txt")
+                let name = preview.isEmpty ? "Texto \(stamp())" : preview
+                let url = destination(name: name, ext: "txt")
                 if (try? text.write(to: url, atomically: true, encoding: .utf8)) != nil {
-                    add([FileItem(url: url)])
+                    add([cleanNamedItem(url: url, name: name)])
                 }
             }
         }
+    }
+
+    /// Item com nome limpo (sem extensão visível).
+    private func cleanNamedItem(url: URL, name: String) -> FileItem {
+        FileItem(
+            url: url,
+            name: name,
+            isDirectory: false,
+            date: Date(),
+            size: Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        )
     }
 
     private func sanitize(_ name: String) -> String {

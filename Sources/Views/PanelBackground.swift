@@ -60,6 +60,8 @@ struct WindowDragHandle: NSViewRepresentable {
 final class DragHandleView: NSView {
     var onDragEnded: (() -> Void)?
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
         window?.performDrag(with: event)
         // performDrag só retorna quando o arrasto acaba.

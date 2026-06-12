@@ -79,6 +79,7 @@ final class PanelController: ObservableObject {
     private var watchTimer: Timer?
     private var outsideClickMonitor: Any?
     private var lastMouseInside = Date()
+    private var shownAt = Date.distantPast
     private var lastCorner: HotCorner = .bottomRight
     private var lastScreen: NSScreen?
 
@@ -127,6 +128,7 @@ final class PanelController: ObservableObject {
         panel.makeKeyAndOrderFront(nil)
         isVisible = true
         lastMouseInside = Date()
+        shownAt = Date()
         externalDragActive = NSEvent.pressedMouseButtons != 0
 
         NSAnimationContext.runAnimationGroup { context in
@@ -501,6 +503,8 @@ final class PanelController: ObservableObject {
     /// Clique global fora do painel (e fora do preview) fecha o painel.
     func handleOutsideClick() {
         guard isVisible, !isPinned, let panel else { return }
+        // Grace period: cliques rápidos logo após abrir não fecham.
+        guard Date().timeIntervalSince(shownAt) > 0.5 else { return }
         let mouse = NSEvent.mouseLocation
         guard !panel.frame.contains(mouse), !preview.frameContains(mouse) else { return }
         hide()

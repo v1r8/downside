@@ -11,6 +11,9 @@ struct ItemInteraction: NSViewRepresentable {
     var onClickUp: (NSEvent.ModifierFlags) -> Void
     var onDoubleClick: () -> Void
     var dragURLs: () -> [URL]
+    /// Quando definido e retorna texto, o arrasto carrega TEXTO PURO
+    /// (cola como texto no destino) em vez de um arquivo.
+    var dragText: (() -> String?)? = nil
     var menu: () -> NSMenu?
     var onHover: (Bool, NSRect) -> Void
     var onDragStarted: () -> Void = {}
@@ -31,6 +34,7 @@ struct ItemInteraction: NSViewRepresentable {
         view.onClickUp = onClickUp
         view.onDoubleClick = onDoubleClick
         view.dragURLs = dragURLs
+        view.dragText = dragText
         view.menuProvider = menu
         view.onHover = onHover
         view.onDragStarted = onDragStarted
@@ -43,6 +47,7 @@ final class InteractionView: NSView, NSDraggingSource {
     var onClickUp: ((NSEvent.ModifierFlags) -> Void)?
     var onDoubleClick: (() -> Void)?
     var dragURLs: (() -> [URL])?
+    var dragText: (() -> String?)?
     var menuProvider: (() -> NSMenu?)?
     var onHover: ((Bool, NSRect) -> Void)?
     var onDragStarted: (() -> Void)?
@@ -50,6 +55,10 @@ final class InteractionView: NSView, NSDraggingSource {
 
     private var downEvent: NSEvent?
     private var didDrag = false
+
+    /// Painel não-ativante: o primeiro clique deve agir imediatamente,
+    /// não ser "engolido" pela ativação da janela.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     // MARK: - Hover
 
@@ -106,10 +115,25 @@ final class InteractionView: NSView, NSDraggingSource {
     }
 
     private func beginDrag(with event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+
+        // Texto puro (itens de clipboard): cola como texto no destino.
+        if let dragText, let text = dragText(), !text.isEmpty {
+            let item = NSDraggingItem(pasteboardWriter: text as NSString)
+            let icon = NSImage(
+                systemSymbolName: "text.alignleft",
+                accessibilityDescription: nil
+            ) ?? NSImage()
+            item.setDraggingFrame(
+                NSRect(x: location.x - 16, y: location.y - 16, width: 32, height: 32),
+                contents: icon
+            )
+            beginDraggingSession(with: [item], event: event, source: self)
+            return
+        }
+
         let urls = dragURLs?() ?? []
         guard !urls.isEmpty else { return }
-
-        let location = convert(event.locationInWindow, from: nil)
         let side: CGFloat = 48
         let items = urls.enumerated().map { index, url -> NSDraggingItem in
             let item = NSDraggingItem(pasteboardWriter: url as NSURL)

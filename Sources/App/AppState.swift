@@ -66,5 +66,6 @@ final class AppState {
             folderMonitor.update(folderURL: url)
         }
         panelController.refreshAppearance()
+        ThemeStore.shared.bump()
     }
 }

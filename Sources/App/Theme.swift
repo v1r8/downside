@@ -48,6 +48,19 @@ extension Color {
     }
 }
 
+/// Notifica as views quando cor/intensidade dos destaques mudam —
+/// Theme.tint é estático, então sem isto a UI só atualizava ao reabrir.
+@MainActor
+final class ThemeStore: ObservableObject {
+    static let shared = ThemeStore()
+
+    @Published private(set) var tick = 0
+
+    func bump() {
+        tick &+= 1
+    }
+}
+
 /// Fundo de pílula "liquid glass": material fino + tinta de destaque.
 struct GlassCapsule: View {
     var tint: Double = 0.6

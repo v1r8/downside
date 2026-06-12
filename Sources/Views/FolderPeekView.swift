@@ -13,6 +13,8 @@ import UniformTypeIdentifiers
 ///  - ⌘A seleciona tudo; Esc fecha o painel
 ///  - parar o mouse sobre um item abre o preview (configurável)
 struct FolderPeekView: View {
+    @ObservedObject private var themeStore = ThemeStore.shared
+
     @EnvironmentObject private var monitor: FolderMonitor
     @EnvironmentObject private var panel: PanelController
     @EnvironmentObject private var clipboard: ClipboardMonitor
@@ -82,16 +84,19 @@ struct FolderPeekView: View {
             .filter { NaturalSearch.matches(FileItem(url: $0), query: query) }
     }
 
-    private var archiveHits: [(entry: ArchivedStack, url: URL)] {
+    /// Resultados do fichário agrupados pela pilha onde vivem.
+    private var archiveGroups: [(entry: ArchivedStack, urls: [URL])] {
         guard let query = parsedQuery else { return [] }
-        var hits: [(ArchivedStack, URL)] = []
+        var groups: [(ArchivedStack, [URL])] = []
         for entry in history.archived.prefix(60) {
-            for url in entry.urls.prefix(30)
-            where NaturalSearch.matches(FileItem(url: url), query: query) {
-                hits.append((entry, url))
+            let hits = entry.urls.prefix(30).filter {
+                NaturalSearch.matches(FileItem(url: $0), query: query)
+            }
+            if !hits.isEmpty {
+                groups.append((entry, Array(hits.prefix(10))))
             }
         }
-        return Array(hits.prefix(30))
+        return Array(groups.prefix(12))
     }
 
     @ViewBuilder
@@ -102,10 +107,26 @@ struct FolderPeekView: View {
                 searchHitRow(url, context: nil)
             }
         }
-        if !archiveHits.isEmpty {
+        if !archiveGroups.isEmpty {
             searchSectionHeader("No fichário", icon: "book")
-            ForEach(Array(archiveHits.enumerated()), id: \.offset) { _, hit in
-                searchHitRow(hit.url, context: hit.entry.title)
+            ForEach(archiveGroups, id: \.entry.id) { group in
+                // Pilha-mãe primeiro; os docs aparecem subordinados.
+                HStack(spacing: 5 * scale) {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 8.5 * scale))
+                        .foregroundStyle(Theme.accent)
+                    Text(group.entry.title)
+                        .font(.system(size: 10.5 * scale, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.top, 5 * scale)
+                .padding(.horizontal, 4 * scale)
+
+                ForEach(group.urls, id: \.self) { url in
+                    searchHitRow(url, context: nil)
+                        .padding(.leading, 16 * scale)
+                }
             }
         }
     }
@@ -234,7 +255,7 @@ struct FolderPeekView: View {
     // MARK: - Cabeçalho
 
     private var header: some View {
-        HStack(spacing: 8 * scale) {
+        HStack(spacing: 10 * scale) {
             // A busca é única (pasta, clipboard, pilhas e fichário) e se
             // estende até o canto esquerdo.
             searchField
@@ -272,15 +293,36 @@ struct FolderPeekView: View {
 
             Group {
                 // Livrinho do fichário: também é alvo de drop — arraste
-                // uma pilha para cá para arquivá-la.
+                // uma pilha para cá para arquivá-la. Durante arrastos
+                // ganha a cor de destaque e um anel tracejado (como o
+                // alvo de nova pilha).
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         showHistory.toggle()
                     }
                 } label: {
                     Image(systemName: showHistory ? "book.fill" : "book")
-                        .foregroundStyle(historyDropTargeted ? Theme.accent : Color.primary)
+                        .foregroundStyle(
+                            historyDropTargeted || panel.isDraggingFromPanel || panel.externalDragActive
+                                ? Theme.accent
+                                : Color.primary
+                        )
+                        .frame(width: 26 * scale, height: 26 * scale)
+                        .contentShape(Circle())
                 }
+                .background(
+                    Circle()
+                        .fill(Theme.tint(historyDropTargeted ? 0.15 : 0.06))
+                        .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
+                )
+                .overlay(
+                    Circle()
+                        .strokeBorder(
+                            Theme.accent,
+                            style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                        )
+                        .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
+                )
                 .scaleEffect(
                     historyDropTargeted ? 1.25
                         : (panel.isDraggingFromPanel || panel.externalDragActive ? 1.12 : 1)
@@ -300,6 +342,8 @@ struct FolderPeekView: View {
                     panel.isPinned.toggle()
                 } label: {
                     Image(systemName: panel.isPinned ? "pin.fill" : "pin")
+                        .frame(width: 24 * scale, height: 24 * scale)
+                        .contentShape(Rectangle())
                 }
                 .help(panel.isPinned ? "Liberar painel" : "Manter painel aberto")
 
@@ -308,6 +352,8 @@ struct FolderPeekView: View {
                     openSettings()
                 } label: {
                     Image(systemName: "gearshape")
+                        .frame(width: 24 * scale, height: 24 * scale)
+                        .contentShape(Rectangle())
                 }
                 .help("Configurações")
             }
@@ -528,6 +574,11 @@ struct FolderPeekView: View {
                     onClickUp: { modifiers in clickUp(on: item, modifiers: modifiers) },
                     onDoubleClick: { open(targets(for: item)) },
                     dragURLs: { dragTargets(for: item) },
+                    // Texto do clipboard é arrastado como TEXTO (cola no
+                    // destino), não como upload de arquivo .txt.
+                    dragText: (isClipboardItem(item) && item.url.pathExtension == "txt")
+                        ? { try? String(contentsOf: item.url, encoding: .utf8) }
+                        : nil,
                     menu: { contextMenu(for: item) },
                     onHover: { hovering, rect in
                         if hovering {
@@ -649,7 +700,9 @@ struct FolderPeekView: View {
 
     private func mouseDown(on item: FileItem, modifiers: NSEvent.ModifierFlags) {
         panel.preview.dismiss()
-        guard let index = monitor.items.firstIndex(of: item) else { return }
+        // displayedItems: inclui itens de clipboard (que não estão no
+        // monitor da pasta) — multi-seleção vale para todos.
+        guard let index = displayedItems.firstIndex(of: item) else { return }
 
         if modifiers.contains(.command) {
             if selection.contains(item.url) {
@@ -659,8 +712,10 @@ struct FolderPeekView: View {
             }
             anchorIndex = index
         } else if modifiers.contains(.shift), let anchor = anchorIndex {
-            let range = min(anchor, index)...max(anchor, index)
-            selection.formUnion(monitor.items[range].map(\.url))
+            let items = displayedItems
+            let upper = min(max(anchor, index), items.count - 1)
+            let lower = min(min(anchor, index), upper)
+            selection.formUnion(items[lower...upper].map(\.url))
         } else if !selection.contains(item.url) {
             selection = [item.url]
             anchorIndex = index
@@ -675,14 +730,14 @@ struct FolderPeekView: View {
               selection.count > 1
         else { return }
         selection = [item.url]
-        anchorIndex = monitor.items.firstIndex(of: item)
+        anchorIndex = displayedItems.firstIndex(of: item)
     }
 
     /// Alvo das ações: a seleção, se o item fizer parte dela; senão,
     /// apenas o item (como no Finder). Mantém a ordem da listagem.
     private func targets(for item: FileItem) -> [URL] {
         if selection.contains(item.url) {
-            return monitor.items.filter { selection.contains($0.url) }.map(\.url)
+            return displayedItems.filter { selection.contains($0.url) }.map(\.url)
         }
         return [item.url]
     }
@@ -882,7 +937,7 @@ private struct CleanCardsButton: View {
                 value: shuffling
             )
             .animation(.spring(response: 0.3, dampingFraction: 0.6), value: fanned)
-            .frame(width: 34 * scale, height: 34 * scale)
+            .frame(width: 40 * scale, height: 40 * scale)
         }
         .buttonStyle(.borderless)
         .background(glassCircle)
@@ -891,13 +946,23 @@ private struct CleanCardsButton: View {
     }
 
     private func card(angle: Double, offset: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 2.5, style: .continuous)
-            .strokeBorder(Color.primary.opacity(0.55), lineWidth: 1.2)
-            .background(
-                RoundedRectangle(cornerRadius: 2.5, style: .continuous)
-                    .fill(Color.primary.opacity(0.08))
+        RoundedRectangle(cornerRadius: 3, style: .continuous)
+            .fill(Color(nsColor: .textBackgroundColor))
+            .overlay(
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.45), lineWidth: 1.2)
             )
-            .frame(width: 11 * scale, height: 15 * scale)
+            .overlay(
+                // "Linhas" da carta, para ler como documento.
+                VStack(spacing: 2.5 * scale) {
+                    Capsule().frame(width: 7 * scale, height: 1)
+                    Capsule().frame(width: 7 * scale, height: 1)
+                    Capsule().frame(width: 4.5 * scale, height: 1)
+                }
+                .foregroundStyle(Color.primary.opacity(0.35))
+            )
+            .frame(width: 13 * scale, height: 17.5 * scale)
+            .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
             .rotationEffect(.degrees(angle))
             .offset(x: offset * scale)
     }
@@ -917,10 +982,19 @@ private struct CleanCardsButton: View {
 
     private var legacyGlass: some View {
         Circle()
-            .fill(.ultraThinMaterial)
-            .opacity(0.75)
-            .overlay(Circle().strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
-            .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+            .fill(.regularMaterial)
+            .overlay(
+                Circle()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.35), Color.white.opacity(0.05)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
     }
 }
 
