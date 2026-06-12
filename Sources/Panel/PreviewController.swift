@@ -212,6 +212,9 @@ final class PreviewController {
 
     func hover(item: FileItem, near rect: NSRect) {
         guard Prefs.hoverPreviewEnabled, !isSticky else { return }
+        // Durante um arrasto (botão pressionado), preview só atrapalha:
+        // quem arrasta não está buscando olhar outros arquivos.
+        guard NSEvent.pressedMouseButtons == 0 else { return }
         dismissTask?.cancel()
         dismissTask = nil
 
@@ -246,6 +249,7 @@ final class PreviewController {
     /// vez, num cartão ao lado do painel (nunca por cima).
     func hoverStack(_ id: UUID, urls: [URL], near rect: NSRect) {
         guard Prefs.stackPreviewEnabled, !isSticky, !urls.isEmpty else { return }
+        guard NSEvent.pressedMouseButtons == 0 else { return }
         dismissTask?.cancel()
         dismissTask = nil
 

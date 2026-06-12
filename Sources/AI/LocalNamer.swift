@@ -106,37 +106,49 @@ enum LinkPeek {
         return URL(string: raw)
     }
 
-    /// Resumo da página: título + canal/autor (YouTube via oEmbed) ou
-    /// título + descrição (og:description / meta description).
+    /// Dossiê da página para a IA nomear com especificidade.
+    /// YouTube: título + canal (oEmbed) + DESCRIÇÃO do vídeo (extraída
+    /// do HTML da página). Outras páginas: título + descrição (og:/
+    /// meta) + site + um trecho do texto visível.
     static func pageSummary(for link: URL) async -> String? {
         let host = link.host?.lowercased() ?? ""
-        if host.contains("youtube.com") || host.contains("youtu.be"),
-           let encoded = link.absoluteString.addingPercentEncoding(
-               withAllowedCharacters: .alphanumerics
-           ),
-           let oembed = URL(string: "https://www.youtube.com/oembed?format=json&url=\(encoded)") {
-            var request = URLRequest(url: oembed)
-            request.timeoutInterval = 6
-            if let (data, _) = try? await URLSession.shared.data(for: request),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let title = json["title"] as? String, !title.isEmpty {
-                let author = (json["author_name"] as? String) ?? ""
-                let suffix = author.isEmpty ? "" : " (vídeo do canal \(author))"
-                return "\"\(String(title.prefix(140)))\"\(suffix)"
+        if host.contains("youtube.com") || host.contains("youtu.be") {
+            var parts: [String] = []
+            if let encoded = link.absoluteString.addingPercentEncoding(
+                   withAllowedCharacters: .alphanumerics
+               ),
+               let oembed = URL(string: "https://www.youtube.com/oembed?format=json&url=\(encoded)") {
+                var request = URLRequest(url: oembed)
+                request.timeoutInterval = 6
+                if let (data, _) = try? await URLSession.shared.data(for: request),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let title = json["title"] as? String, !title.isEmpty {
+                    let author = (json["author_name"] as? String) ?? ""
+                    let suffix = author.isEmpty ? "" : " (vídeo do canal \(author))"
+                    parts.append("\"\(String(title.prefix(140)))\"\(suffix)")
+                }
             }
+            if let html = await fetchHTML(link),
+               let description = firstMatch(
+                   in: html,
+                   pattern: "\"shortDescription\":\"((?:\\\\.|[^\"\\\\]){1,1200})\""
+               ) {
+                parts.append("descrição do vídeo: \(unescapeJSON(description).prefix(600))")
+            }
+            return parts.isEmpty ? nil : parts.joined(separator: " — ")
         }
 
-        var request = URLRequest(url: link)
-        request.timeoutInterval = 6
-        request.setValue("Mozilla/5.0 (Macintosh)", forHTTPHeaderField: "User-Agent")
-        guard let (data, _) = try? await URLSession.shared.data(for: request) else {
-            return nil
-        }
-        let html = String(decoding: data.prefix(220_000), as: UTF8.self)
+        guard let html = await fetchHTML(link) else { return nil }
 
         var parts: [String] = []
         if let title = firstMatch(in: html, pattern: "<title[^>]*>([^<]{1,300})</title>") {
             parts.append("\"\(String(title.prefix(140)))\"")
+        }
+        if let site = firstMatch(
+            in: html,
+            pattern: "<meta[^>]+property=[\"']og:site_name[\"'][^>]+content=[\"']([^\"']{1,120})[\"']"
+        ) {
+            parts.append("site: \(site)")
         }
         let description = firstMatch(
             in: html,
@@ -146,10 +158,57 @@ enum LinkPeek {
             pattern: "<meta[^>]+content=[\"']([^\"']{1,400})[\"'][^>]+(?:property=[\"']og:description[\"']|name=[\"']description[\"'])"
         )
         if let description {
-            parts.append(String(description.prefix(220)))
+            parts.append(String(description.prefix(260)))
+        }
+        // Sem descrição? Um trecho do texto visível da página ajuda.
+        if description == nil, let body = visibleText(from: html) {
+            parts.append("trecho da página: \(body.prefix(400))")
         }
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: " — ")
+    }
+
+    private static func fetchHTML(_ link: URL) async -> String? {
+        var request = URLRequest(url: link)
+        request.timeoutInterval = 7
+        request.setValue("Mozilla/5.0 (Macintosh)", forHTTPHeaderField: "User-Agent")
+        request.setValue("pt-BR,pt;q=0.9,en;q=0.7", forHTTPHeaderField: "Accept-Language")
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else {
+            return nil
+        }
+        return String(decoding: data.prefix(600_000), as: UTF8.self)
+    }
+
+    /// Texto visível da página: remove scripts/styles/tags e colapsa
+    /// espaços — o suficiente para a IA entender do que se trata.
+    private static func visibleText(from html: String) -> String? {
+        var text = html
+        for block in ["script", "style", "noscript", "svg", "head"] {
+            text = text.replacingOccurrences(
+                of: "<\(block)[\\s\\S]*?</\(block)>",
+                with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+        text = text.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        text = decodeEntities(text)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.count > 40 ? text : nil
+    }
+
+    /// Desfaz escapes de string JSON (\n, \", &…).
+    private static func unescapeJSON(_ raw: String) -> String {
+        var text = raw
+            .replacingOccurrences(of: "\\n", with: " ")
+            .replacingOccurrences(of: "\\r", with: " ")
+            .replacingOccurrences(of: "\\t", with: " ")
+            .replacingOccurrences(of: "\\\"", with: "\"")
+            .replacingOccurrences(of: "\\/", with: "/")
+            .replacingOccurrences(of: "\\u0026", with: "&")
+            .replacingOccurrences(of: "\\\\", with: "\\")
+        text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Primeiro grupo de captura do padrão, com entidades decodificadas.

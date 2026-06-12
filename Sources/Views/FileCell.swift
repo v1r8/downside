@@ -195,6 +195,14 @@ struct ThumbnailView: View {
     @State private var image: NSImage?
 
     var body: some View {
+        if url.pathExtension.lowercased() == "webloc" {
+            LinkThumbnail(url: url)
+        } else {
+            quickLookThumb
+        }
+    }
+
+    private var quickLookThumb: some View {
         Group {
             if let image {
                 Image(nsImage: image)
@@ -213,6 +221,49 @@ struct ThumbnailView: View {
                 for: url,
                 size: CGSize(width: 120, height: 120)
             )
+        }
+    }
+}
+
+/// Miniatura de link: cartãozinho com o FAVICON do site (menor que um
+/// ícone de arquivo comum) e a setinha de link; globo como fallback.
+struct LinkThumbnail: View {
+    let url: URL
+
+    @State private var icon: NSImage?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.18, style: .continuous)
+                    .fill(Color.primary.opacity(0.055))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: side * 0.18, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+                if let icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: side * 0.5, height: side * 0.5)
+                        .clipShape(RoundedRectangle(cornerRadius: side * 0.09, style: .continuous))
+                } else {
+                    Image(systemName: "globe")
+                        .font(.system(size: side * 0.4))
+                        .foregroundStyle(.secondary)
+                }
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: side * 0.18, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(side * 0.08)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+        .task(id: url) {
+            guard let link = LinkPeek.url(fromWebloc: url) else { return }
+            icon = await FaviconLoader.load(for: link)
         }
     }
 }

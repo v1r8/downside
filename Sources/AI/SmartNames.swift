@@ -19,14 +19,23 @@ enum SmartNamer {
         if let line = await TitlePrompt.excerpt(for: url, deep: true) {
             context += "\nConteúdo: \(line)"
         }
+        let isLink = url.pathExtension.lowercased() == "webloc"
+        let linkHint = isLink
+            ? """
+             Este item é um LINK: identifique o conteúdo da página/vídeo \
+            pelo título, canal/autor e descrição fornecidos (ex.: \
+            "Outliers — entrevista com gestor da Genoa", "Artigo do \
+            Valor sobre juros"). Nunca descreva como "link" ou "site".
+            """
+            : ""
         let prompt = """
         Sugira um nome ESPECÍFICO e claro (3 a 8 palavras, em português, \
         sem extensão, sem aspas, sem barras) que identifique este \
         documento pelo conteúdo real, como uma pessoa o descreveria numa \
         frase curta. CITE nomes próprios presentes no conteúdo — empresa, \
         programa, pessoas, projeto, produto. NUNCA use genéricos como \
-        "relatório financeiro" ou "link da internet". Responda APENAS \
-        com o nome:
+        "relatório financeiro" ou "link da internet".\(linkHint) Responda \
+        APENAS com o nome:
 
         \(context)
         """

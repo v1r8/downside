@@ -69,6 +69,16 @@ struct FolderPeekView: View {
         .easeInOut(duration: Prefs.ficharioRevealSpeed)
     }
 
+    /// Lastro opaco do fichário: uma camada de material que o destaca
+    /// do conteúdo da pasta e impede qualquer sobreposição de textos
+    /// durante a animação.
+    private var ficharioBackdrop: some View {
+        Rectangle()
+            .fill(.regularMaterial)
+            .overlay(Rectangle().fill(Theme.tint(0.035)))
+            .ignoresSafeArea()
+    }
+
     private var scale: CGFloat {
         let value = CGFloat(uiScaleRaw)
         return (0.8...2.0).contains(value) ? value : 1.0
@@ -240,12 +250,29 @@ struct FolderPeekView: View {
             if mode != .minimal {
                 Divider().opacity(0.4)
             }
-            if showHistory {
-                HistoryOverlay(scale: scale, searchQuery: searchText)
-                    .transition(historyTransition)
-            } else {
-                content
-                    .transition(.opacity)
+            // Coreografia do fichário: ele entra POR CIMA do conteúdo,
+            // com lastro opaco e recortado pelo círculo que cresce a
+            // partir da bolha — os títulos nunca se sobrepõem. O
+            // conteúdo da pasta fica parado embaixo até ser coberto
+            // (e só então some); ao fechar, ele já reaparece inteiro
+            // sob o círculo que encolhe.
+            ZStack(alignment: .top) {
+                if !showHistory {
+                    content
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.easeOut(duration: 0.18)),
+                            removal: .opacity.animation(
+                                .linear(duration: 0.04)
+                                    .delay(max(0.1, Prefs.ficharioRevealSpeed - 0.04))
+                            )
+                        ))
+                }
+                if showHistory {
+                    HistoryOverlay(scale: scale, searchQuery: searchText)
+                        .background(ficharioBackdrop)
+                        .transition(historyTransition)
+                        .zIndex(1)
+                }
             }
         }
         .animation(revealAnimation, value: showHistory)
@@ -1217,7 +1244,11 @@ private struct FicharioBubble: View {
 
 /// Abertura do fichário: um círculo que nasce na bolha e se expande
 /// até revelar o painel inteiro; fechar encolhe de volta (a mesma
-/// animação, invertida pelo próprio SwiftUI).
+/// animação, invertida pelo próprio SwiftUI). Sem fade — o fichário é
+/// opaco e o recorte faz o trabalho. Um anel na cor de destaque marca
+/// a fronteira do círculo enquanto ele viaja, e o conteúdo tem um
+/// parallax sutil (nasce 2% menor, ancorado na bolha) para dar
+/// profundidade à expansão e principalmente à retração.
 private struct CircleRevealModifier: ViewModifier, Animatable {
     var progress: CGFloat
 
@@ -1228,8 +1259,16 @@ private struct CircleRevealModifier: ViewModifier, Animatable {
 
     func body(content: Content) -> some View {
         content
+            .scaleEffect(0.98 + 0.02 * progress, anchor: .topLeading)
             .clipShape(RevealCircle(progress: progress))
-            .opacity(progress < 0.12 ? Double(progress / 0.12) : 1)
+            .overlay(
+                RevealCircle(progress: progress)
+                    .stroke(
+                        Theme.tint(Double(1 - progress) * 0.7),
+                        lineWidth: 1.5
+                    )
+                    .allowsHitTesting(false)
+            )
     }
 }
 

@@ -17,9 +17,11 @@ struct HistoryOverlay: View {
     @State private var expandedEntry: UUID?
     @State private var renamingEntry: UUID?
     @State private var renameText = ""
+    @State private var listDropTargeted = false
     @StateObject private var runner = BulkActionRunner()
     @ObservedObject private var actionConfig = BulkActionConfigStore.shared
     @AppStorage(PrefKey.historyLayout) private var layoutRaw = 1
+    @AppStorage("ficharioFavoritesCollapsed") private var favoritesCollapsed = false
 
     /// Organizações do fichário: lista + 5 alternativas.
     enum HistoryLayout: Int, CaseIterable {
@@ -122,9 +124,11 @@ struct HistoryOverlay: View {
                     case .list:
                         LazyVStack(spacing: 4 * scale) {
                             if !favoriteEntries.isEmpty {
-                                sectionHeader("Favoritas", icon: "star.fill")
-                                ForEach(favoriteEntries) { entry in
-                                    card(entry)
+                                favoritesHeader
+                                if !favoritesCollapsed {
+                                    ForEach(favoriteEntries) { entry in
+                                        card(entry)
+                                    }
                                 }
                                 sectionHeader("Todas")
                             }
@@ -135,9 +139,11 @@ struct HistoryOverlay: View {
                     case .compact:
                         LazyVStack(spacing: 2) {
                             if !favoriteEntries.isEmpty {
-                                sectionHeader("Favoritas", icon: "star.fill")
-                                ForEach(favoriteEntries) { entry in
-                                    compactRow(entry)
+                                favoritesHeader
+                                if !favoritesCollapsed {
+                                    ForEach(favoriteEntries) { entry in
+                                        compactRow(entry)
+                                    }
                                 }
                                 sectionHeader("Todas")
                             }
@@ -148,8 +154,10 @@ struct HistoryOverlay: View {
                     case .grid:
                         LazyVStack(spacing: 6 * scale) {
                             if !favoriteEntries.isEmpty {
-                                sectionHeader("Favoritas", icon: "star.fill")
-                                historyGrid(favoriteEntries, minimum: 140, maximum: 190)
+                                favoritesHeader
+                                if !favoritesCollapsed {
+                                    historyGrid(favoriteEntries, minimum: 140, maximum: 190)
+                                }
                                 sectionHeader("Todas")
                             }
                             historyGrid(regularEntries, minimum: 140, maximum: 190)
@@ -157,8 +165,10 @@ struct HistoryOverlay: View {
                     case .mosaic:
                         LazyVStack(spacing: 6 * scale) {
                             if !favoriteEntries.isEmpty {
-                                sectionHeader("Favoritas", icon: "star.fill")
-                                historyGrid(favoriteEntries, minimum: 64, maximum: 84, mosaic: true)
+                                favoritesHeader
+                                if !favoritesCollapsed {
+                                    historyGrid(favoriteEntries, minimum: 64, maximum: 84, mosaic: true)
+                                }
                                 sectionHeader("Todas")
                             }
                             historyGrid(regularEntries, minimum: 64, maximum: 84, mosaic: true)
@@ -166,9 +176,11 @@ struct HistoryOverlay: View {
                     case .timeline:
                         LazyVStack(spacing: 4 * scale) {
                             if !favoriteEntries.isEmpty {
-                                sectionHeader("Favoritas", icon: "star.fill")
-                                ForEach(favoriteEntries) { entry in
-                                    card(entry)
+                                favoritesHeader
+                                if !favoritesCollapsed {
+                                    ForEach(favoriteEntries) { entry in
+                                        card(entry)
+                                    }
                                 }
                             }
                             ForEach(timelineGroups, id: \.0) { group in
@@ -181,8 +193,10 @@ struct HistoryOverlay: View {
                     case .shelves:
                         LazyVStack(alignment: .leading, spacing: 8 * scale) {
                             if !favoriteEntries.isEmpty {
-                                sectionHeader("Favoritas", icon: "star.fill")
-                                shelfRow(favoriteEntries)
+                                favoritesHeader
+                                if !favoritesCollapsed {
+                                    shelfRow(favoriteEntries)
+                                }
                             }
                             ForEach(shelfGroups, id: \.0) { group in
                                 sectionHeader(group.0)
@@ -194,6 +208,32 @@ struct HistoryOverlay: View {
             }
         }
         .padding(10 * scale)
+        // A lista inteira também é alvo de drop: solte uma pilha (ou
+        // docs) em qualquer lugar do fichário aberto para arquivar —
+        // alternativa a mirar na bolha.
+        .overlay {
+            if listDropTargeted {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Theme.tint(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(
+                                Theme.accent,
+                                style: StrokeStyle(lineWidth: 1, dash: [4, 4])
+                            )
+                    )
+                    .padding(4 * scale)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $listDropTargeted) { providers in
+            StackDropHandler.collectFileURLs(providers) { urls in
+                archiveDropped(urls)
+            }
+            return true
+        }
+        .animation(.easeOut(duration: 0.15), value: listDropTargeted)
         .animation(.spring(response: 0.3, dampingFraction: 0.82), value: expandedEntry)
         .animation(.spring(response: 0.3, dampingFraction: 0.82), value: selection)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: layoutRaw)
@@ -354,6 +394,47 @@ struct HistoryOverlay: View {
             }
         }
         .frame(width: size * 1.7 * scale, alignment: .leading)
+    }
+
+    /// Arquiva o que foi solto sobre a lista do fichário: pilha ativa
+    /// vira ficha (e é liberada); ficha já existente não duplica.
+    private func archiveDropped(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let dropped = Set(urls)
+        guard !store.archived.contains(where: { Set($0.urls) == dropped }) else { return }
+        let matching = panel.stacks.first { Set($0.urls) == dropped }
+        let snapshot = matching ?? FileStack(urls: urls)
+        store.archiveAndName(snapshot)
+        if let matching {
+            panel.clearStack(matching.id)
+        }
+    }
+
+    /// Cabeçalho da seção de favoritas: clique expande/oculta.
+    private var favoritesHeader: some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                favoritesCollapsed.toggle()
+            }
+        } label: {
+            HStack(spacing: 4 * scale) {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 8.5 * scale))
+                    .foregroundStyle(.yellow)
+                Text("Favoritas")
+                Text("\(favoriteEntries.count)")
+                    .foregroundStyle(.tertiary)
+                Image(systemName: favoritesCollapsed ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 7 * scale, weight: .semibold))
+                Spacer()
+            }
+            .font(.system(size: 10 * scale, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .padding(.top, 4 * scale)
+        .help(favoritesCollapsed ? "Mostrar favoritas" : "Ocultar favoritas")
     }
 
     /// Estrelinha de favorita (indicador discreto junto ao título).

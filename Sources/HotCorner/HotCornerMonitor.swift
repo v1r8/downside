@@ -11,6 +11,10 @@ final class HotCornerMonitor {
     private var dwellCorner: HotCorner?
     /// Evita redisparo contínuo: só rearma depois que o mouse sai do canto.
     private var armed = true
+    /// changeCount do pasteboard de arrasto enquanto nenhum botão está
+    /// pressionado — referência para saber se um arrasto DE VERDADE
+    /// começou (clicar e segurar sem arrastar nada não conta).
+    private var idleDragCount = NSPasteboard(name: .drag).changeCount
 
     func start() {
         stop()
@@ -42,7 +46,16 @@ final class HotCornerMonitor {
         let frame = screen.frame
         let corners = Prefs.corners
         let edges = Prefs.edges
-        let dragging = NSEvent.pressedMouseButtons != 0
+
+        // Arrasto REAL: botão pressionado E o pasteboard de arrasto
+        // ganhou conteúdo desde o último momento ocioso. Clicar e
+        // segurar (seleção de texto etc.) não abre o painel.
+        let buttons = NSEvent.pressedMouseButtons
+        let dragPasteboard = NSPasteboard(name: .drag)
+        if buttons == 0 {
+            idleDragCount = dragPasteboard.changeCount
+        }
+        let dragging = buttons != 0 && dragPasteboard.changeCount != idleDragCount
 
         // Cantos têm prioridade; laterais (se ativadas) abrem ancorando
         // no canto mais próximo da metade da tela em que o mouse está.
