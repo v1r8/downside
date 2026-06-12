@@ -379,23 +379,33 @@ struct HistoryOverlay: View {
     /// Leque de ícones da ficha, com o indicador de bulk action
     /// "carta no fim do deck" quando configurado.
     private func fan(_ entry: ArchivedStack, size: CGFloat) -> some View {
-        ZStack(alignment: .leading) {
-            ForEach(Array(entry.urls.prefix(3).enumerated()), id: \.offset) { index, url in
-                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                    .resizable()
-                    .frame(width: size * scale, height: size * scale)
-                    .padding(.leading, CGFloat(index) * size * 0.25 * scale)
-                    .rotationEffect(.degrees(Double(index) * 3 - 3))
-                    // Profundidade explícita: sem isto a carta holográfica
-                    // sempre ficava à frente, ignorando a configuração.
-                    .zIndex(Double(3 - index))
-                    // O leque é a âncora: ao expandir/fechar a ficha, as
-                    // cartas voam daqui para as linhas e de volta.
-                    .matchedGeometryEffect(
-                        id: "fich-\(entry.id)-\(url.path)",
-                        in: deck,
-                        isSource: true
-                    )
+        // IGUAL às pilhas provisórias: com a ficha EXPANDIDA o leque
+        // vira um deck "vazio" — as cartas estão na lista, e só existe
+        // UMA âncora de geometria por vez. Na retração elas voam de
+        // volta para cá.
+        let isOpen = expandedEntry == entry.id
+        return ZStack(alignment: .leading) {
+            if isOpen {
+                Image(systemName: "tray")
+                    .font(.system(size: size * 0.65 * scale))
+                    .foregroundStyle(.secondary)
+                    .opacity(0.45)
+            } else {
+                ForEach(Array(entry.urls.prefix(3).enumerated()), id: \.element) { index, url in
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                        .resizable()
+                        .frame(width: size * scale, height: size * scale)
+                        .padding(.leading, CGFloat(index) * size * 0.25 * scale)
+                        .rotationEffect(.degrees(Double(index) * 3 - 3))
+                        // Profundidade explícita: sem isto a carta holográfica
+                        // sempre ficava à frente, ignorando a configuração.
+                        .zIndex(Double(3 - index))
+                        .matchedGeometryEffect(
+                            id: "fich-\(entry.id)-\(url.path)",
+                            in: deck,
+                            isSource: true
+                        )
+                }
             }
             if entry.hadBulkAction, !entry.outputPaths.isEmpty, Prefs.bulkBadgeStyle == 1 {
                 HoloCardBadge(

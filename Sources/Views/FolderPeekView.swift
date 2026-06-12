@@ -173,9 +173,14 @@ struct FolderPeekView: View {
     }
 
     /// Busca unificada: resultados das pilhas ativas e do fichário.
+    /// Cada doc aparece UMA vez, na sua seção principal (linha do
+    /// tempo > pilhas > fichário) — sem repetições confusas.
     private var stackHits: [URL] {
         guard let query = parsedQuery else { return [] }
+        let shown = Set(displayedItems.map(\.url))
+        var seen: Set<URL> = []
         return panel.stacks.flatMap(\.urls)
+            .filter { !shown.contains($0) && seen.insert($0).inserted }
             .filter {
                 NaturalSearch.matches(
                     FileItem(url: $0), query: query,
@@ -184,19 +189,23 @@ struct FolderPeekView: View {
             }
     }
 
-    /// Resultados do fichário agrupados pela pilha onde vivem.
+    /// Resultados do fichário agrupados pela pilha onde vivem — sem
+    /// repetir docs já mostrados na linha do tempo ou nas pilhas.
     private var archiveGroups: [(entry: ArchivedStack, urls: [URL])] {
         guard let query = parsedQuery else { return [] }
+        var shown = Set(displayedItems.map(\.url)).union(stackHits)
         var groups: [(ArchivedStack, [URL])] = []
         for entry in history.archived.prefix(60) {
             let hits = entry.urls.prefix(30).filter {
-                NaturalSearch.matches(
+                !shown.contains($0) && NaturalSearch.matches(
                     FileItem(url: $0), query: query,
                     content: contentIndex.text(for: $0)
                 )
             }
             if !hits.isEmpty {
-                groups.append((entry, Array(hits.prefix(10))))
+                let kept = Array(hits.prefix(10))
+                shown.formUnion(kept)
+                groups.append((entry, kept))
             }
         }
         return Array(groups.prefix(12))
@@ -227,7 +236,7 @@ struct FolderPeekView: View {
                 searchShowAll.contains("pilhas") ? stackHits : Array(stackHits.prefix(5)),
                 id: \.self
             ) { url in
-                searchHitRow(url, context: nil)
+                searchHitRow(url)
             }
             showAllButton(section: "pilhas", total: stackHits.count, limit: 5)
         }
@@ -256,7 +265,7 @@ struct FolderPeekView: View {
                 .padding(.horizontal, 4 * scale)
 
                 ForEach(group.urls, id: \.self) { url in
-                    searchHitRow(url, context: nil)
+                    searchHitRow(url)
                         .padding(.leading, 16 * scale)
                 }
             }
@@ -327,26 +336,17 @@ struct FolderPeekView: View {
         }
     }
 
-    private func searchHitRow(_ url: URL, context: String?) -> some View {
-        HStack(spacing: 8 * scale) {
-            ThumbnailView(url: url)
-                .frame(width: 22 * scale, height: 22 * scale)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(url.lastPathComponent)
-                    .font(.system(size: 11.5 * scale))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if let context {
-                    Text(context)
-                        .font(.system(size: 9 * scale))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer()
-        }
-        .padding(.vertical, 2 * scale)
-        .padding(.horizontal, 4 * scale)
+    /// Resultado de pilhas/fichário com o MESMO visual das linhas da
+    /// pasta (miniatura, nome inteligente, etiqueta, tamanho e data) —
+    /// um doc tem sempre a mesma cara, esteja onde estiver.
+    private func searchHitRow(_ url: URL) -> some View {
+        let item = FileItem(url: url)
+        return FileRow(
+            item: item,
+            isSelected: false,
+            scale: scale,
+            isHovered: hoveredItem == url
+        )
         .contentShape(Rectangle())
         .overlay(
             ItemInteraction(
@@ -357,11 +357,15 @@ struct FolderPeekView: View {
                 menu: { nil },
                 onHover: { hovering, rect in
                     if hovering {
-                        panel.preview.hover(item: FileItem(url: url), near: rect)
+                        hoveredItem = url
+                        panel.preview.hover(item: item, near: rect)
                     } else {
+                        if hoveredItem == url { hoveredItem = nil }
                         panel.preview.unhover(url)
                     }
-                }
+                },
+                onDragStarted: { panel.isDraggingFromPanel = true },
+                onDragEnded: { panel.isDraggingFromPanel = false }
             )
         )
     }
@@ -805,6 +809,8 @@ struct FolderPeekView: View {
     private func timelineHeader(_ title: String, first: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4 * scale) {
             if !first {
+                // Respiro entre o último item do dia anterior e o
+                // divisor (configurável em Exibição).
                 Divider()
                     .opacity(0.35)
                     .padding(.top, Prefs.timelineGap * scale)
@@ -812,10 +818,11 @@ struct FolderPeekView: View {
             Text(title)
                 .font(.system(size: 11 * Prefs.timelineHeaderScale * scale, weight: .bold))
                 .foregroundStyle(.secondary)
-                .padding(.top, first ? 2 * scale : 4 * scale)
+                .padding(.top, first ? 2 * scale : 7 * scale)
         }
         .padding(.horizontal, 4 * scale)
-        .padding(.bottom, 3 * scale)
+        // Título do dia um pouco mais separado do primeiro item.
+        .padding(.bottom, 7 * scale)
     }
 
     /// Agrupamento por período do modo Linha do tempo.
@@ -1680,6 +1687,9 @@ private struct FicharioEdgeGlow: View {
                     .blur(radius: 6)
             }
         }
+        // O halo desfocado NÃO pode escapar do contorno arredondado do
+        // painel — sem isto sobrava uma quina suja nas pontas.
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .allowsHitTesting(false)
     }
 }
