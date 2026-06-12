@@ -151,7 +151,7 @@ struct CalendarAddButton: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 8 * scale)
                         .padding(.vertical, 3 * scale)
-                        .background(Capsule().fill(Color.accentColor))
+                        .background(Capsule().fill(Theme.accent))
                 }
                 .buttonStyle(.borderless)
                 .help("Adicionar evento à Agenda")

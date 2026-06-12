@@ -18,6 +18,9 @@ struct DropStackBar: View {
     @State private var expanded: UUID?
     /// Mantém a forma de fundo durante a animação de fechamento.
     @State private var lastDetailID: UUID?
+    /// Aba em fechamento: mantém o pescoço esticado até o fade acabar,
+    /// para a borda do painel não cruzar os chips vizinhos.
+    @State private var closingID: UUID?
     @State private var chipFrames: [UUID: CGRect] = [:]
     /// Namespace do "deck de cartas": os ícones viajam entre o leque do
     /// chip e as linhas da lista expandida.
@@ -36,6 +39,7 @@ struct DropStackBar: View {
                         stack: stack,
                         scale: scale,
                         isActive: expanded == stack.id,
+                        isClosing: closingID == stack.id,
                         deck: deck,
                         onToggleExpand: { toggle(stack.id) }
                     )
@@ -88,8 +92,15 @@ struct DropStackBar: View {
     private func toggle(_ id: UUID) {
         if expanded == id {
             // Fechamento: mola mais suave, cartas voltam com calma.
+            closingID = id
             withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) {
                 expanded = nil
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: 520_000_000)
+                if closingID == id {
+                    withAnimation(.easeOut(duration: 0.18)) { closingID = nil }
+                }
             }
         } else if expanded != nil {
             // Troca de aba: crossfade curto e ágil, sem empilhar molas.
@@ -252,6 +263,7 @@ private struct StackChip: View {
     let stack: FileStack
     let scale: CGFloat
     let isActive: Bool
+    let isClosing: Bool
     let deck: Namespace.ID
     let onToggleExpand: () -> Void
 
@@ -278,10 +290,12 @@ private struct StackChip: View {
                             .padding(.leading, CGFloat(index) * 6 * scale)
                             .rotationEffect(.degrees(Double(index) * 3 - 3))
                             .zIndex(Double(3 - index))
+                            // O chip é a âncora da geometria: na retração
+                            // as cartas voam direto para cá, sem teleporte.
                             .matchedGeometryEffect(
                                 id: "\(stack.id)-\(url.path)",
                                 in: deck,
-                                isSource: false
+                                isSource: true
                             )
                     }
                 }
@@ -293,7 +307,7 @@ private struct StackChip: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 6 * scale)
                 .padding(.vertical, 2 * scale)
-                .background(Capsule().fill(Color.accentColor))
+                .background(GlassCapsule(tint: 0.7))
 
             Image(systemName: isActive ? "chevron.up" : "chevron.down")
                 .font(.system(size: 8 * scale, weight: .semibold))
@@ -301,9 +315,9 @@ private struct StackChip: View {
         }
         .padding(.horizontal, 8 * scale)
         .padding(.top, 5 * scale)
-        // A aba ativa desce até o painel; as outras ficam com um respiro
-        // proporcional ao espaçamento lateral entre os chips.
-        .padding(.bottom, (isActive ? 17 : 5) * scale)
+        // A aba ativa (ou em fechamento) desce até o painel; as outras
+        // ficam com respiro proporcional ao espaçamento lateral.
+        .padding(.bottom, (isActive || isClosing ? 17 : 5) * scale)
         .frame(maxWidth: .infinity)
         .background(chipBackground)
         .scaleEffect(targeted ? 1.05 : 1)
@@ -351,7 +365,7 @@ private struct StackChip: View {
     private var chipBackground: some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         return ZStack(alignment: .leading) {
-            shape.fill(targeted ? Color.accentColor.opacity(0.13) : paneFill)
+            shape.fill(targeted ? Theme.tint(0.13) : paneFill)
                 .opacity(isActive ? (targeted ? 1 : 0) : 1)
             shape.strokeBorder(paneStroke, lineWidth: 1)
                 .opacity(isActive ? 0 : 1)
@@ -359,14 +373,14 @@ private struct StackChip: View {
             if replaceProgress > 0 {
                 GeometryReader { proxy in
                     Rectangle()
-                        .fill(Color.accentColor.opacity(0.25))
+                        .fill(Theme.tint(0.25))
                         .frame(width: proxy.size.width * replaceProgress)
                 }
                 .clipShape(shape)
             }
 
             if targeted {
-                shape.strokeBorder(Color.accentColor, lineWidth: 1)
+                shape.strokeBorder(Theme.accent, lineWidth: 1)
             }
         }
     }
@@ -433,17 +447,17 @@ private struct NewStackTarget: View {
             Text(panel.stacks.isEmpty ? "Solte para empilhar" : "Nova pilha")
         }
         .font(.system(size: 11 * scale))
-        .foregroundStyle(targeted ? Color.accentColor : Color.secondary)
+        .foregroundStyle(targeted ? Theme.accent : Color.secondary)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 9 * scale)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(targeted ? Color.accentColor.opacity(0.1) : Color.clear)
+                .fill(targeted ? Theme.tint(0.1) : Color.clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(
-                    targeted ? Color.accentColor : Color.secondary.opacity(0.4),
+                    targeted ? Theme.accent : Color.secondary.opacity(0.4),
                     style: StrokeStyle(lineWidth: 1, dash: [4, 3])
                 )
         )
@@ -479,50 +493,72 @@ private struct StackDetailContent: View {
     @State private var targeted = false
     @StateObject private var runner = BulkActionRunner()
 
+    private var originals: [URL] {
+        stack.urls.filter { !stack.outputs.contains($0) }
+    }
+
+    private var outputs: [URL] {
+        stack.urls.filter { stack.outputs.contains($0) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(stack.urls, id: \.self) { url in
+                    ForEach(originals, id: \.self) { url in
                         row(url)
                     }
                 }
                 .padding(6 * scale)
             }
-            .frame(maxHeight: 190 * scale)
+            .frame(maxHeight: 170 * scale)
+
+            // Outputs de ações em massa: fixados na base, lado a lado,
+            // como mini-pilhas.
+            if !outputs.isEmpty {
+                Divider().opacity(0.3)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6 * scale) {
+                        ForEach(outputs, id: \.self) { url in
+                            outputChip(url)
+                        }
+                    }
+                    .padding(.horizontal, 8 * scale)
+                    .padding(.vertical, 5 * scale)
+                }
+            }
 
             Divider().opacity(0.3)
 
-            HStack(spacing: 8 * scale) {
-                Menu {
-                    Button("Gerar PDF da pilha") {
+            // Pílulas de ação no espírito do deck — sem menu escondido.
+            HStack(spacing: 6 * scale) {
+                if let label = runner.runningLabel {
+                    ProgressView().controlSize(.mini)
+                    Text(label)
+                        .font(.system(size: 10 * scale))
+                        .foregroundStyle(.secondary)
+                } else {
+                    actionPill("doc.richtext", "PDF", help: "Gerar um PDF único com a pilha") {
                         runner.run("Gerando PDF…", stack: stack, panel: panel) {
                             try await runner.makePDF(from: $0)
                         }
                     }
-                    Button("Baixar links da pilha") {
-                        runner.run("Baixando links…", stack: stack, panel: panel) {
+                    actionPill("link", "Links", help: "Baixar os links encontrados na pilha") {
+                        runner.run("Baixando…", stack: stack, panel: panel) {
                             try await runner.downloadLinks(from: $0)
                         }
                     }
-                    Divider()
-                    Button("Resumir com IA") {
+                    actionPill("text.alignleft", "Resumo", help: "Resumir com IA", disabled: !ClaudeService.hasKey) {
                         runner.run("Resumindo…", stack: stack, panel: panel) {
                             try await runner.summarize($0)
                         }
                     }
-                    .disabled(!ClaudeService.hasKey)
-                    Button("Palavras-chave com IA") {
+                    actionPill("tag", "Chaves", help: "Palavras-chave com IA", disabled: !ClaudeService.hasKey) {
                         runner.run("Caracterizando…", stack: stack, panel: panel) {
                             try await runner.keywords($0)
                         }
                     }
-                    .disabled(!ClaudeService.hasKey)
-                    if !ClaudeService.hasKey {
-                        Text("IA: configure a chave em Configurações → IA")
-                    }
-                    Divider()
-                    Button("Arquivar no fichário") {
+                    actionPill("book", "Arquivar", help: "Guardar no fichário e liberar a pilha") {
                         let snapshot = stack
                         Task { @MainActor in
                             let title = await ClaudeService.stackTitle(for: snapshot.urls)
@@ -531,19 +567,11 @@ private struct StackDetailContent: View {
                         }
                         onClose()
                     }
-                } label: {
-                    Label("Ações", systemImage: "wand.and.stars")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-
-                if let label = runner.runningLabel {
-                    ProgressView().controlSize(.mini)
-                    Text(label)
-                        .foregroundStyle(.secondary)
-                } else if let message = runner.message {
-                    Text(message)
-                        .foregroundStyle(.secondary)
+                    if let message = runner.message {
+                        Text(message)
+                            .font(.system(size: 10 * scale))
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Spacer()
@@ -551,12 +579,8 @@ private struct StackDetailContent: View {
                 Button("Abrir todos") {
                     stack.urls.forEach { NSWorkspace.shared.open($0) }
                 }
-                Button("Limpar", role: .destructive) {
-                    panel.clearStack(stack.id)
-                    onClose()
-                }
+                .font(.system(size: 10.5 * scale))
             }
-            .font(.system(size: 10.5 * scale))
             .buttonStyle(.borderless)
             .padding(.horizontal, 8 * scale)
             .padding(.vertical, 5 * scale)
@@ -564,11 +588,11 @@ private struct StackDetailContent: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.accentColor.opacity(targeted ? 0.08 : 0))
+                .fill(Theme.tint(targeted ? 0.08 : 0))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.accentColor, lineWidth: 1)
+                .strokeBorder(Theme.accent, lineWidth: 1)
                 .opacity(targeted ? 1 : 0)
         )
         .animation(.easeOut(duration: 0.12), value: targeted)
@@ -587,6 +611,135 @@ private struct StackDetailContent: View {
         )
     }
 
+    private func actionPill(
+        _ icon: String,
+        _ title: String,
+        help: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 3 * scale) {
+                Image(systemName: icon)
+                    .font(.system(size: 9 * scale, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 9.5 * scale, weight: .semibold))
+            }
+            .padding(.horizontal, 7 * scale)
+            .padding(.vertical, 3.5 * scale)
+            .background(
+                Capsule().fill(disabled ? Color.primary.opacity(0.05) : Color.primary.opacity(0.08))
+            )
+            .overlay(
+                Capsule().strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+            )
+            .foregroundStyle(disabled ? Color.secondary.opacity(0.5) : Color.primary)
+        }
+        .buttonStyle(.borderless)
+        .disabled(disabled)
+        .help(disabled ? "Configure a chave da API em Configurações → IA" : help)
+    }
+
+    /// Mini-chip de output, no estilo das pilhas: arrastável, com
+    /// preview no hover e menu de reaplicar/remover.
+    private func outputChip(_ url: URL) -> some View {
+        HStack(spacing: 5 * scale) {
+            ThumbnailView(url: url)
+                .frame(width: 18 * scale, height: 18 * scale)
+            Text(url.lastPathComponent)
+                .font(.system(size: 10 * scale))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 110 * scale)
+            Image(systemName: "sparkles")
+                .font(.system(size: 8 * scale))
+                .foregroundStyle(Theme.accent)
+        }
+        .padding(.horizontal, 7 * scale)
+        .padding(.vertical, 4 * scale)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Theme.tint(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.tint(0.35), lineWidth: 1)
+        )
+        .overlay(
+            ItemInteraction(
+                onMouseDown: { _ in panel.preview.dismiss() },
+                onClickUp: { _ in },
+                onDoubleClick: { NSWorkspace.shared.open(url) },
+                dragURLs: { [url] },
+                menu: { outputMenu(url) },
+                onHover: { hovering, rect in
+                    if hovering {
+                        panel.preview.hover(item: FileItem(url: url), near: rect)
+                    } else {
+                        panel.preview.unhover(url)
+                    }
+                },
+                onDragStarted: { panel.isDraggingFromPanel = true },
+                onDragEnded: { panel.isDraggingFromPanel = false }
+            )
+        )
+    }
+
+    private func outputMenu(_ url: URL) -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(ActionMenuItem(title: "Abrir") {
+            NSWorkspace.shared.open(url)
+        })
+        menu.addItem(ActionMenuItem(title: "Mostrar no Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        })
+        menu.addItem(.separator())
+
+        let reapply = NSMenuItem(title: "Reaplicar ação", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        let snapshot = stack
+        submenu.addItem(ActionMenuItem(title: "Gerar PDF") { [runner] in
+            Task { @MainActor in
+                runner.run("Gerando PDF…", stack: snapshot, panel: AppState.shared.panelController) {
+                    try await runner.makePDF(from: $0)
+                }
+            }
+        })
+        submenu.addItem(ActionMenuItem(title: "Baixar links") { [runner] in
+            Task { @MainActor in
+                runner.run("Baixando…", stack: snapshot, panel: AppState.shared.panelController) {
+                    try await runner.downloadLinks(from: $0)
+                }
+            }
+        })
+        submenu.addItem(ActionMenuItem(title: "Resumir com IA") { [runner] in
+            Task { @MainActor in
+                runner.run("Resumindo…", stack: snapshot, panel: AppState.shared.panelController) {
+                    try await runner.summarize($0)
+                }
+            }
+        })
+        submenu.addItem(ActionMenuItem(title: "Palavras-chave com IA") { [runner] in
+            Task { @MainActor in
+                runner.run("Caracterizando…", stack: snapshot, panel: AppState.shared.panelController) {
+                    try await runner.keywords($0)
+                }
+            }
+        })
+        reapply.submenu = submenu
+        menu.addItem(reapply)
+
+        menu.addItem(.separator())
+        let id = stack.id
+        menu.addItem(ActionMenuItem(title: "Apagar output") {
+            Task { @MainActor in
+                AppState.shared.panelController.removeFromStack(id, url: url)
+                try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            }
+        })
+        return menu
+    }
+
     private func row(_ url: URL) -> some View {
         let isOutput = stack.outputs.contains(url)
         return HStack(spacing: 6 * scale) {
@@ -596,7 +749,7 @@ private struct StackDetailContent: View {
                     .matchedGeometryEffect(
                         id: "\(stack.id)-\(url.path)",
                         in: deck,
-                        isSource: true
+                        isSource: false
                     )
                 Text(url.lastPathComponent)
                     .font(.system(size: 11.5 * scale))
@@ -605,7 +758,7 @@ private struct StackDetailContent: View {
                 if isOutput {
                     Image(systemName: "sparkles")
                         .font(.system(size: 9 * scale))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Theme.accent)
                         .help("Gerado por ação em massa")
                 }
                 Spacer(minLength: 4)
@@ -644,7 +797,7 @@ private struct StackDetailContent: View {
         .padding(.vertical, 2 * scale)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isOutput ? Color.accentColor.opacity(0.1) : Color.clear)
+                .fill(isOutput ? Theme.tint(0.1) : Color.clear)
         )
     }
 
@@ -783,6 +936,27 @@ enum StackDropHandler {
     }
 
     // MARK: - Helpers
+
+    /// Resolve todos os fileURLs de um drop de uma vez (para alvos que
+    /// precisam do conjunto completo, como o fichário).
+    static func collectFileURLs(_ providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {
+        let group = DispatchGroup()
+        var urls: [URL] = []
+        let queue = DispatchQueue(label: "downside.collect")
+        for provider in providers
+        where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { data, _ in
+                if let url = urlFrom(data) {
+                    queue.sync { urls.append(url) }
+                }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            completion(urls)
+        }
+    }
 
     private static func urlFrom(_ data: (any NSSecureCoding)?) -> URL? {
         if let data = data as? Data {

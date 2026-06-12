@@ -48,6 +48,12 @@ final class StackHistoryStore: ObservableObject {
         save()
     }
 
+    func rename(_ id: UUID, to title: String) {
+        guard let index = archived.firstIndex(where: { $0.id == id }) else { return }
+        archived[index].title = title
+        save()
+    }
+
     private func load() {
         guard let data = try? Data(contentsOf: storeURL),
               let decoded = try? JSONDecoder().decode([ArchivedStack].self, from: data)

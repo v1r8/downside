@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// Conteúdo do painel: cabeçalho + arquivos no modo de exibição escolhido
 /// (grade, lista ou minimalista).
@@ -30,8 +31,12 @@ struct FolderPeekView: View {
     @State private var showHistory = false
     @State private var confirmClean = false
     @State private var cleaning: [(url: URL, from: CGPoint)]?
+    @State private var historyDropTargeted = false
 
     @AppStorage(PrefKey.clipboardTimeline) private var clipboardTimeline = false
+    @AppStorage(PrefKey.showDragHandle) private var showDragHandle = true
+    @AppStorage(PrefKey.clipboardStyle) private var clipboardStyle = 2
+    @ObservedObject private var history = StackHistoryStore.shared
 
     private let gridSpace = "downside.grid"
 
@@ -70,6 +75,92 @@ struct FolderPeekView: View {
         return monitor.items.filter { $0.date < cutoff }
     }
 
+    /// Busca unificada: resultados das pilhas ativas e do fichário.
+    private var stackHits: [URL] {
+        guard let query = parsedQuery else { return [] }
+        return panel.stacks.flatMap(\.urls)
+            .filter { NaturalSearch.matches(FileItem(url: $0), query: query) }
+    }
+
+    private var archiveHits: [(entry: ArchivedStack, url: URL)] {
+        guard let query = parsedQuery else { return [] }
+        var hits: [(ArchivedStack, URL)] = []
+        for entry in history.archived.prefix(60) {
+            for url in entry.urls.prefix(30)
+            where NaturalSearch.matches(FileItem(url: url), query: query) {
+                hits.append((entry, url))
+            }
+        }
+        return Array(hits.prefix(30))
+    }
+
+    @ViewBuilder
+    private var searchExtraSections: some View {
+        if !stackHits.isEmpty {
+            searchSectionHeader("Nas pilhas", icon: "square.stack.3d.up")
+            ForEach(stackHits, id: \.self) { url in
+                searchHitRow(url, context: nil)
+            }
+        }
+        if !archiveHits.isEmpty {
+            searchSectionHeader("No fichário", icon: "book")
+            ForEach(Array(archiveHits.enumerated()), id: \.offset) { _, hit in
+                searchHitRow(hit.url, context: hit.entry.title)
+            }
+        }
+    }
+
+    private func searchSectionHeader(_ title: String, icon: String) -> some View {
+        HStack(spacing: 5 * scale) {
+            Image(systemName: icon)
+            Text(title)
+        }
+        .font(.system(size: 10 * scale, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 10 * scale)
+        .padding(.bottom, 3 * scale)
+    }
+
+    private func searchHitRow(_ url: URL, context: String?) -> some View {
+        HStack(spacing: 8 * scale) {
+            ThumbnailView(url: url)
+                .frame(width: 22 * scale, height: 22 * scale)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(url.lastPathComponent)
+                    .font(.system(size: 11.5 * scale))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let context {
+                    Text(context)
+                        .font(.system(size: 9 * scale))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 2 * scale)
+        .padding(.horizontal, 4 * scale)
+        .contentShape(Rectangle())
+        .overlay(
+            ItemInteraction(
+                onMouseDown: { _ in panel.preview.dismiss() },
+                onClickUp: { _ in },
+                onDoubleClick: { NSWorkspace.shared.open(url) },
+                dragURLs: { [url] },
+                menu: { nil },
+                onHover: { hovering, rect in
+                    if hovering {
+                        panel.preview.hover(item: FileItem(url: url), near: rect)
+                    } else {
+                        panel.preview.unhover(url)
+                    }
+                }
+            )
+        )
+    }
+
     var body: some View {
         // No minimalista o texto fica branco com sombra sobre a tela
         // escurecida, então forçamos o esquema escuro.
@@ -102,7 +193,7 @@ struct FolderPeekView: View {
                 Divider().opacity(0.4)
             }
             if showHistory {
-                HistoryOverlay(scale: scale)
+                HistoryOverlay(scale: scale, searchQuery: searchText)
             } else {
                 content
             }
@@ -144,22 +235,8 @@ struct FolderPeekView: View {
 
     private var header: some View {
         HStack(spacing: 8 * scale) {
-            // Clicar no nome/ícone da pasta abre no Finder.
-            Button {
-                NSWorkspace.shared.activateFileViewerSelecting([monitor.folderURL])
-            } label: {
-                HStack(spacing: 6 * scale) {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: monitor.folderURL.path))
-                        .resizable()
-                        .frame(width: 18 * scale, height: 18 * scale)
-                        .opacity(mode == .minimal ? 0.85 : 1)
-                    Text(monitor.folderURL.lastPathComponent)
-                        .font(.system(size: 13 * scale, weight: .semibold))
-                        .minimalShadow(mode == .minimal)
-                }
-            }
-            .help("Abrir no Finder")
-
+            // A busca é única (pasta, clipboard, pilhas e fichário) e se
+            // estende até o canto esquerdo.
             searchField
 
             // Ao selecionar, a busca encolhe e o contador surge ao lado.
@@ -177,41 +254,48 @@ struct FolderPeekView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8 * scale)
                     .padding(.vertical, 4 * scale)
-                    .background(Capsule().fill(Color.accentColor))
+                    .background(GlassCapsule(tint: 0.7))
                 }
                 .help("\(selection.count) selecionados — clique para limpar")
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 11 * scale))
-                .foregroundStyle(.secondary)
-                .frame(width: 18 * scale, height: 18 * scale)
-                .contentShape(Rectangle())
-                .overlay(WindowDragHandle { panel.panelDragEnded() })
-                .help("Arraste para reposicionar — o painel encaixa na grade da tela e memoriza")
+            if showDragHandle {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 11 * scale))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18 * scale, height: 18 * scale)
+                    .contentShape(Rectangle())
+                    .overlay(WindowDragHandle { panel.panelDragEnded() })
+                    .help("Arraste para reposicionar — o painel encaixa na grade da tela e memoriza")
+            }
 
             Group {
+                // Livrinho do fichário: também é alvo de drop — arraste
+                // uma pilha para cá para arquivá-la.
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         showHistory.toggle()
                     }
                 } label: {
-                    Image(systemName: showHistory ? "books.vertical.fill" : "books.vertical")
+                    Image(systemName: showHistory ? "book.fill" : "book")
+                        .foregroundStyle(historyDropTargeted ? Theme.accent : Color.primary)
                 }
-                .help("Fichário de pilhas")
-
-                Button {
-                    guard cleaning == nil else { return }
-                    if cleanableItems.isEmpty {
-                        NSSound.beep()
-                    } else {
-                        confirmClean = true
+                .scaleEffect(
+                    historyDropTargeted ? 1.25
+                        : (panel.isDraggingFromPanel || panel.externalDragActive ? 1.12 : 1)
+                )
+                .animation(
+                    .spring(response: 0.25, dampingFraction: 0.7),
+                    value: historyDropTargeted || panel.isDraggingFromPanel || panel.externalDragActive
+                )
+                .onDrop(of: [.fileURL], isTargeted: $historyDropTargeted) { providers in
+                    StackDropHandler.collectFileURLs(providers) { urls in
+                        archiveDropped(urls)
                     }
-                } label: {
-                    Image(systemName: "trash")
+                    return true
                 }
-                .help("Limpar: mover itens com +30 dias para o Lixo")
+                .help("Fichário de pilhas — solte uma pilha aqui para arquivar")
                 Button {
                     panel.isPinned.toggle()
                 } label: {
@@ -278,6 +362,9 @@ struct FolderPeekView: View {
                             // na área visível, ao rolar até o fim.
                             LazyVStack(spacing: 0) {
                                 layout
+                                if parsedQuery != nil {
+                                    searchExtraSections
+                                }
                                 if monitor.isTruncated {
                                     LoadMoreFooter(scale: scale) {
                                         monitor.increaseLimit()
@@ -289,10 +376,10 @@ struct FolderPeekView: View {
 
                             if let rect = rubberBand {
                                 RoundedRectangle(cornerRadius: 2)
-                                    .fill(Color.accentColor.opacity(0.14))
+                                    .fill(Theme.tint(0.14))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 2)
-                                            .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
+                                            .strokeBorder(Theme.tint(0.5), lineWidth: 1)
                                     )
                                     .frame(width: rect.width, height: rect.height)
                                     .offset(x: rect.minX, y: rect.minY)
@@ -326,15 +413,26 @@ struct FolderPeekView: View {
                         scrolledDown = minY < -250
                     }
 
-                    if scrolledDown {
-                        BackToTopButton(scale: scale) {
-                            withAnimation(.easeInOut(duration: 0.35)) {
-                                scrollProxy.scrollTo("downside.top", anchor: .top)
+                    VStack(spacing: 8 * scale) {
+                        if scrolledDown {
+                            BackToTopButton(scale: scale) {
+                                withAnimation(.easeInOut(duration: 0.35)) {
+                                    scrollProxy.scrollTo("downside.top", anchor: .top)
+                                }
+                            }
+                            .transition(.scale(scale: 0.7).combined(with: .opacity))
+                        }
+
+                        CleanCardsButton(scale: scale) {
+                            guard cleaning == nil else { return }
+                            if cleanableItems.isEmpty {
+                                NSSound.beep()
+                            } else {
+                                confirmClean = true
                             }
                         }
-                        .padding(12 * scale)
-                        .transition(.scale(scale: 0.7).combined(with: .opacity))
                     }
+                    .padding(12 * scale)
                 }
                 .animation(.spring(response: 0.3, dampingFraction: 0.8), value: scrolledDown)
             }
@@ -399,6 +497,10 @@ struct FolderPeekView: View {
         }
     }
 
+    private func isClipboardItem(_ item: FileItem) -> Bool {
+        item.url.path.contains("/Downside/Clipboard/")
+    }
+
     /// Aplica a cada item os comportamentos comuns a todos os modos:
     /// rastreio de posição (rubber band) e a camada nativa de interação
     /// (cliques, arrasto múltiplo, menu de contexto e hover).
@@ -407,6 +509,11 @@ struct FolderPeekView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
+            .modifier(ClipboardMark(
+                active: isClipboardItem(item),
+                style: clipboardStyle,
+                scale: scale
+            ))
             .background(
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -486,6 +593,23 @@ struct FolderPeekView: View {
                 .minimalShadow(mode == .minimal)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Arquiva uma pilha arrastada para o livrinho: se as URLs casam
+    /// com uma pilha ativa, ela é arquivada e liberada; senão, cria-se
+    /// uma ficha nova com o que foi solto.
+    private func archiveDropped(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let dropped = Set(urls)
+        let matching = panel.stacks.first { Set($0.urls) == dropped }
+        let snapshot = matching ?? FileStack(urls: urls)
+        Task { @MainActor in
+            let title = await ClaudeService.stackTitle(for: snapshot.urls)
+            StackHistoryStore.shared.archive(snapshot, title: title)
+            if let matching {
+                panel.clearStack(matching.id)
+            }
+        }
     }
 
     // MARK: - Limpeza com deck
@@ -629,7 +753,7 @@ private struct LoadMoreFooter: View {
                 Circle()
                     .trim(from: 0, to: progress)
                     .stroke(
-                        Color.accentColor,
+                        Theme.accent,
                         style: StrokeStyle(lineWidth: 2, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
@@ -655,11 +779,148 @@ private struct LoadMoreFooter: View {
     }
 }
 
+/// Distinção visual dos itens vindos do clipboard — 5 estilos à escolha
+/// nas configurações.
+struct ClipboardMark: ViewModifier {
+    let active: Bool
+    let style: Int
+    let scale: CGFloat
+
+    func body(content: Content) -> some View {
+        if !active {
+            content
+        } else {
+            switch style {
+            case 1: // Borda tracejada
+                content.overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(
+                            Theme.tint(0.5),
+                            style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                        )
+                )
+            case 2: // Selo de clipboard
+                content.overlay(alignment: .topTrailing) {
+                    Image(systemName: "doc.on.clipboard.fill")
+                        .font(.system(size: 8 * scale))
+                        .foregroundStyle(Theme.accent)
+                        .padding(3 * scale)
+                        .allowsHitTesting(false)
+                }
+            case 3: // Barra lateral
+                content.overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(Theme.tint(0.7))
+                        .frame(width: 2.5)
+                        .padding(.vertical, 4 * scale)
+                        .allowsHitTesting(false)
+                }
+            case 4: // Degradê suave
+                content.background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Theme.tint(0.12), .clear],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+            default: // 5: Etiqueta CLIP
+                content.overlay(alignment: .bottomTrailing) {
+                    Text("CLIP")
+                        .font(.system(size: 6.5 * scale, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4 * scale)
+                        .padding(.vertical, 1.5 * scale)
+                        .background(Capsule().fill(Theme.tint(0.8)))
+                        .padding(3 * scale)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+    }
+}
+
 private struct ScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+/// Botão flutuante de limpeza: um mini-deck de cartas em círculo de
+/// vidro bem transparente. As cartas se abrem em leque no hover e dão
+/// uma embaralhada no clique — satisfatório de apertar.
+private struct CleanCardsButton: View {
+    let scale: CGFloat
+    var action: () -> Void
+
+    @State private var fanned = false
+    @State private var shuffling = false
+
+    var body: some View {
+        Button {
+            shuffling = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 280_000_000)
+                shuffling = false
+                action()
+            }
+        } label: {
+            ZStack {
+                card(angle: fanned ? -16 : -5, offset: -3)
+                card(angle: fanned ? 16 : 5, offset: 3)
+                card(angle: 0, offset: 0)
+            }
+            .rotationEffect(.degrees(shuffling ? 12 : 0))
+            .animation(
+                shuffling
+                    ? .easeInOut(duration: 0.07).repeatCount(4, autoreverses: true)
+                    : .spring(response: 0.3, dampingFraction: 0.6),
+                value: shuffling
+            )
+            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: fanned)
+            .frame(width: 34 * scale, height: 34 * scale)
+        }
+        .buttonStyle(.borderless)
+        .background(glassCircle)
+        .onHover { fanned = $0 }
+        .help("Limpar: mover itens com +30 dias para o Lixo")
+    }
+
+    private func card(angle: Double, offset: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+            .strokeBorder(Color.primary.opacity(0.55), lineWidth: 1.2)
+            .background(
+                RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                    .fill(Color.primary.opacity(0.08))
+            )
+            .frame(width: 11 * scale, height: 15 * scale)
+            .rotationEffect(.degrees(angle))
+            .offset(x: offset * scale)
+    }
+
+    @ViewBuilder
+    private var glassCircle: some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            Color.clear.glassEffect(.regular, in: Circle())
+        } else {
+            legacyGlass
+        }
+        #else
+        legacyGlass
+        #endif
+    }
+
+    private var legacyGlass: some View {
+        Circle()
+            .fill(.ultraThinMaterial)
+            .opacity(0.75)
+            .overlay(Circle().strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
+            .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
     }
 }
 

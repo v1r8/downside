@@ -44,13 +44,40 @@ final class ClipboardMonitor: ObservableObject {
             return
         }
 
-        if let text = pasteboard.string(forType: .string),
-           text.trimmingCharacters(in: .whitespacesAndNewlines).count > 2 {
-            let url = destination(name: "Clipboard \(stamp())", ext: "txt")
-            if (try? text.write(to: url, atomically: true, encoding: .utf8)) != nil {
-                add([FileItem(url: url)])
+        if let text = pasteboard.string(forType: .string) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count > 2 else { return }
+
+            // Link copiado vira .webloc com o host no nome (e arte de
+            // link no preview); texto comum vira .txt nomeado pelo
+            // próprio conteúdo.
+            if let link = URL(string: trimmed),
+               link.scheme?.hasPrefix("http") == true, link.host != nil {
+                let plist: [String: Any] = ["URL": trimmed]
+                if let data = try? PropertyListSerialization.data(
+                    fromPropertyList: plist, format: .xml, options: 0
+                ) {
+                    let url = destination(name: "Link — \(sanitize(link.host ?? "web"))", ext: "webloc")
+                    if (try? data.write(to: url)) != nil {
+                        add([FileItem(url: url)])
+                    }
+                }
+            } else {
+                let preview = sanitize(String(trimmed.prefix(28)))
+                let url = destination(name: preview.isEmpty ? "Texto \(stamp())" : preview, ext: "txt")
+                if (try? text.write(to: url, atomically: true, encoding: .utf8)) != nil {
+                    add([FileItem(url: url)])
+                }
             }
         }
+    }
+
+    private func sanitize(_ name: String) -> String {
+        name
+            .replacingOccurrences(of: "/", with: " ")
+            .replacingOccurrences(of: ":", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func add(_ newItems: [FileItem]) {
@@ -70,6 +97,9 @@ final class ClipboardMonitor: ObservableObject {
     }
 
     private func destination(name: String, ext: String) -> URL {
-        Prefs.supportDirectory("Clipboard").appendingPathComponent("\(name).\(ext)")
+        let dir = Prefs.supportDirectory("Clipboard")
+        let plain = dir.appendingPathComponent("\(name).\(ext)")
+        guard FileManager.default.fileExists(atPath: plain.path) else { return plain }
+        return dir.appendingPathComponent("\(name) \(stamp()).\(ext)")
     }
 }

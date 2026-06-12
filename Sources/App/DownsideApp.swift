@@ -22,6 +22,10 @@ struct MenuBarContent: View {
         }
         .keyboardShortcut("d", modifiers: [.command, .shift])
 
+        Button("Abrir pasta no Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([Prefs.folderURL])
+        }
+
         Button("Copiar documento ativo para pilha") {
             if let url = ActiveDocument.grab() {
                 AppState.shared.panelController.addToCurrentStack(url)

@@ -168,6 +168,10 @@ private struct DisplaySettingsTab: View {
     @AppStorage(PrefKey.uiScale) private var uiScale = 1.0
     @AppStorage(PrefKey.hideMargin) private var hideMargin = 220.0
     @AppStorage(PrefKey.autoHideEnabled) private var autoHideEnabled = true
+    @AppStorage(PrefKey.showDragHandle) private var showDragHandle = true
+    @AppStorage(PrefKey.accentColorHex) private var accentHex = ""
+    @AppStorage(PrefKey.accentIntensity) private var accentIntensity = 1.0
+    @AppStorage(PrefKey.clipboardStyle) private var clipboardStyle = 2
 
     var body: some View {
         Form {
@@ -185,6 +189,37 @@ private struct DisplaySettingsTab: View {
                 Text("Interface em \(Int(uiScale * 100))%")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("Destaques") {
+                ColorPicker(
+                    "Cor dos destaques",
+                    selection: Binding(
+                        get: { Color(hex: accentHex) ?? .accentColor },
+                        set: { accentHex = $0.hexString ?? "" }
+                    ),
+                    supportsOpacity: false
+                )
+                Button("Usar cor do sistema") { accentHex = "" }
+                VStack(alignment: .leading) {
+                    Slider(value: $accentIntensity, in: 0.35...1.0) {
+                        Text("Intensidade")
+                    }
+                    Text("Transparência dos destaques: \(Int(accentIntensity * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Interface") {
+                Toggle("Mostrar alça de reposicionamento (≡)", isOn: $showDragHandle)
+                Picker("Itens do clipboard", selection: $clipboardStyle) {
+                    Text("Borda tracejada").tag(1)
+                    Text("Selo de clipboard").tag(2)
+                    Text("Barra lateral").tag(3)
+                    Text("Degradê suave").tag(4)
+                    Text("Etiqueta CLIP").tag(5)
+                }
             }
 
             Section("Fechamento") {
@@ -210,6 +245,11 @@ private struct StackSettingsTab: View {
     @AppStorage(PrefKey.stackReplaceDelay) private var stackReplaceDelay = 3.0
     @AppStorage(PrefKey.stackPreviewEnabled) private var stackPreviewEnabled = true
     @AppStorage(PrefKey.stackPreviewDelay) private var stackPreviewDelay = 1.0
+    @AppStorage(PrefKey.archiveHoverPreview) private var archiveHoverPreview = true
+
+    private var archiveHoverBinding: Binding<Bool> {
+        $archiveHoverPreview
+    }
 
     var body: some View {
         Form {
@@ -229,6 +269,7 @@ private struct StackSettingsTab: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Toggle("Também nas fichas do fichário", isOn: archiveHoverBinding)
             }
         }
         .formStyle(.grouped)

@@ -131,7 +131,12 @@ enum PrefKey {
     static let stackPreviewDelay = "stackPreviewDelay"
     static let stackReplaceDelay = "stackReplaceDelay"
     static let clipboardTimeline = "clipboardTimeline"
+    static let clipboardStyle = "clipboardStyle"
     static let claudeAPIKey = "claudeAPIKey"
+    static let showDragHandle = "showDragHandle"
+    static let accentColorHex = "accentColorHex"
+    static let accentIntensity = "accentIntensity"
+    static let archiveHoverPreview = "archiveHoverPreview"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -245,6 +250,22 @@ enum Prefs {
     /// Inclui capturas do clipboard na linha do tempo da pasta.
     static var clipboardTimelineEnabled: Bool {
         UserDefaults.standard.object(forKey: PrefKey.clipboardTimeline) as? Bool ?? false
+    }
+
+    /// Estilo visual dos itens vindos do clipboard (1 a 5).
+    static var clipboardStyle: Int {
+        let value = UserDefaults.standard.integer(forKey: PrefKey.clipboardStyle)
+        return (1...5).contains(value) ? value : 2
+    }
+
+    /// Alça de reposicionamento visível no header.
+    static var showDragHandle: Bool {
+        UserDefaults.standard.object(forKey: PrefKey.showDragHandle) as? Bool ?? true
+    }
+
+    /// Preview global ao pairar sobre fichas arquivadas.
+    static var archiveHoverPreview: Bool {
+        UserDefaults.standard.object(forKey: PrefKey.archiveHoverPreview) as? Bool ?? true
     }
 
     /// Chave da API do Claude para os recursos de IA (opcional).

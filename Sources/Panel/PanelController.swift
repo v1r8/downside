@@ -286,6 +286,12 @@ final class PanelController: ObservableObject {
         preview.unhoverStack(id)
     }
 
+    /// Variante por URLs (fichas arquivadas do fichário).
+    func hoverStackPreviewURLs(_ id: UUID, urls: [URL]) {
+        guard let frame = panel?.frame else { return }
+        preview.hoverStack(id, urls: urls, near: frame)
+    }
+
     // MARK: - Internals
 
     private func preferredCorner() -> HotCorner {

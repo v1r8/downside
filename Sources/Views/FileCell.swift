@@ -26,7 +26,7 @@ struct FileCell: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(
                     isSelected
-                        ? Color.accentColor.opacity(0.22)
+                        ? Theme.tint(0.22)
                         : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
                 )
         )
@@ -79,7 +79,7 @@ struct FileRow: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(
                     isSelected
-                        ? Color.accentColor.opacity(0.22)
+                        ? Theme.tint(0.22)
                         : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
                 )
         )
@@ -118,7 +118,7 @@ struct MinimalFileRow: View {
                 Capsule()
                     .fill(
                         isSelected
-                            ? Color.accentColor.opacity(0.45)
+                            ? Theme.tint(0.45)
                             : (isHovered ? Color.white.opacity(0.09) : Color.clear)
                     )
             )

@@ -19,6 +19,8 @@ enum PreviewContent {
     case table(URL)
     /// Evento de calendário (.ics) com botão de adicionar à Agenda.
     case event(URL)
+    /// Link da web (.webloc) com arte própria.
+    case link(URL)
     /// Sem renderização disponível: ícone grande do arquivo.
     case icon
 
@@ -26,7 +28,7 @@ enum PreviewContent {
     var isInteractive: Bool {
         switch self {
         case .pdf, .audio, .text, .table, .event: return true
-        case .image, .folder, .icon: return false
+        case .image, .folder, .icon, .link: return false
         }
     }
 
@@ -39,7 +41,7 @@ enum PreviewContent {
         switch self {
         case .image, .icon: return .image
         case .pdf: return .pdf
-        case .text, .event: return .text
+        case .text, .event, .link: return .text
         case .table: return .table
         case .folder: return .folder
         case .audio: return .audio
@@ -77,6 +79,14 @@ enum PreviewBuilder {
             return .table(item.url)
         case "ics":
             return .event(item.url)
+        case "webloc":
+            if let plist = try? PropertyListSerialization.propertyList(
+                from: Data(contentsOf: item.url), format: nil
+            ) as? [String: Any],
+               let raw = plist["URL"] as? String,
+               let target = URL(string: raw) {
+                return .link(target)
+            }
         case _ where textExtensions.contains(ext):
             if item.size < 1_000_000 { return .text(item.url) }
         default:
@@ -625,6 +635,22 @@ struct PreviewCard: View {
                     }
                 }
                 CalendarAddButton(url: url, scale: scale)
+            }
+            .frame(maxWidth: .infinity)
+
+        case .link(let target):
+            VStack(spacing: 8 * scale) {
+                Image(systemName: "safari")
+                    .font(.system(size: 44 * scale, weight: .thin))
+                    .foregroundStyle(Theme.tint(0.9))
+                Text(target.host ?? "Link")
+                    .font(.system(size: 13 * scale, weight: .semibold))
+                Text(target.absoluteString)
+                    .font(.system(size: 9.5 * scale))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
 
