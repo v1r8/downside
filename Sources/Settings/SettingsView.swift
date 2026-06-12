@@ -310,6 +310,13 @@ private struct StackSettingsTab: View {
     @AppStorage(PrefKey.historyLayout) private var historyLayout = 1
     @AppStorage(PrefKey.bulkBadgeStyle) private var bulkBadgeStyle = 1
     @AppStorage(PrefKey.holoCardFront) private var holoCardFront = false
+    @AppStorage(PrefKey.ficharioRevealStyle) private var revealStyle = 1
+    @AppStorage(PrefKey.ficharioRevealSpeed) private var revealSpeed = 0.32
+    @AppStorage(PrefKey.ficharioGlow) private var ficharioGlow = true
+    @AppStorage(PrefKey.ficharioGlowIntensity) private var glowIntensity = 0.8
+    @AppStorage(PrefKey.bulkAIEngine) private var bulkAIEngine = 1
+    @AppStorage(PrefKey.summaryDepth) private var summaryDepth = 2
+    @AppStorage(PrefKey.keywordCount) private var keywordCount = 10.0
     @ObservedObject private var config = BulkActionConfigStore.shared
 
     private var archiveHoverBinding: Binding<Bool> {
@@ -337,6 +344,35 @@ private struct StackSettingsTab: View {
                 Toggle("Também nas fichas do fichário", isOn: archiveHoverBinding)
             }
 
+            Section("Abertura do fichário") {
+                Picker("Animação", selection: $revealStyle) {
+                    Text("Expansão a partir do botão").tag(1)
+                    Text("Desvanecer").tag(2)
+                    Text("Instantânea").tag(3)
+                }
+                if revealStyle != 3 {
+                    VStack(alignment: .leading) {
+                        Slider(value: $revealSpeed, in: 0.15...0.7) {
+                            Text("Velocidade")
+                        }
+                        Text(String(format: "%.2f s — fechar inverte a mesma animação", revealSpeed))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Toggle("Brilho nas bordas com o fichário aberto", isOn: $ficharioGlow)
+                if ficharioGlow {
+                    VStack(alignment: .leading) {
+                        Slider(value: $glowIntensity, in: 0.3...1.5) {
+                            Text("Intensidade do brilho")
+                        }
+                        Text("Brilho em \(Int(glowIntensity * 100))% — usa a cor dos destaques")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section("Fichário e indicadores") {
                 Picker("Organização do fichário", selection: $historyLayout) {
                     Text("Lista").tag(1)
@@ -361,6 +397,24 @@ private struct StackSettingsTab: View {
             }
 
             Section("Ações em massa") {
+                Picker("Motor de IA (resumo/palavras-chave)", selection: $bulkAIEngine) {
+                    Text("Automático — local primeiro, Claude de reserva").tag(1)
+                    Text("Sempre Claude (precisa de chave)").tag(2)
+                    Text("Só local (Apple Intelligence/Ollama)").tag(3)
+                }
+                Picker("Profundidade do resumo", selection: $summaryDepth) {
+                    Text("Denso — bullets, dados e entidades").tag(2)
+                    Text("Curto — tópicos enxutos").tag(1)
+                }
+                VStack(alignment: .leading) {
+                    Slider(value: $keywordCount, in: 5...20, step: 1) {
+                        Text("Palavras-chave")
+                    }
+                    Text("~\(Int(keywordCount)) palavras-chave por caracterização")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 ForEach(config.items) { item in
                     BulkActionConfigRow(item: item)
                 }

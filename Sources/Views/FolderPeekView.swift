@@ -51,6 +51,24 @@ struct FolderPeekView: View {
         panel.isDraggingFromPanel || panel.externalDragActive || panel.hasStacks
     }
 
+    /// Abertura do fichário, configurável: a área se expande a partir
+    /// do botão até ocupar o painel; fechar inverte a mesma animação.
+    private var historyTransition: AnyTransition {
+        switch Prefs.ficharioRevealStyle {
+        case 2: return .opacity
+        case 3: return .identity
+        default:
+            return .modifier(
+                active: CircleRevealModifier(progress: 0),
+                identity: CircleRevealModifier(progress: 1)
+            )
+        }
+    }
+
+    private var revealAnimation: Animation {
+        .easeInOut(duration: Prefs.ficharioRevealSpeed)
+    }
+
     private var scale: CGFloat {
         let value = CGFloat(uiScaleRaw)
         return (0.8...2.0).contains(value) ? value : 1.0
@@ -224,13 +242,13 @@ struct FolderPeekView: View {
             }
             if showHistory {
                 HistoryOverlay(scale: scale, searchQuery: searchText)
-                    .transition(.magicReveal)
+                    .transition(historyTransition)
             } else {
                 content
                     .transition(.opacity)
             }
         }
-        .animation(.spring(response: 0.42, dampingFraction: 0.82), value: showHistory)
+        .animation(revealAnimation, value: showHistory)
         .alert("Limpar a pasta?", isPresented: $confirmClean) {
             Button("Mover para o Lixo", role: .destructive) { startClean() }
             Button("Cancelar", role: .cancel) {}
@@ -247,6 +265,14 @@ struct FolderPeekView: View {
             if mode != .minimal {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+        }
+        // Com o fichário aberto, um brilho suave respira ao longo de
+        // todas as bordas do painel — fica óbvio onde você está.
+        .overlay {
+            if showHistory, Prefs.ficharioGlowEnabled, mode != .minimal {
+                FicharioEdgeGlow(intensity: Prefs.ficharioGlowIntensity)
+                    .transition(.opacity)
             }
         }
         // Fecha/abre a faixa de pilhas com mola (ex.: última pilha
@@ -282,7 +308,7 @@ struct FolderPeekView: View {
                 dropTargeted: historyDropTargeted,
                 dragActive: panel.isDraggingFromPanel || panel.externalDragActive
             ) {
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+                withAnimation(revealAnimation) {
                     showHistory.toggle()
                 }
             }
@@ -1088,8 +1114,10 @@ extension View {
 }
 
 /// Bolha do fichário: círculo de vidro líquido suspenso (sombra
-/// flutuante), com brilho irisado que se expande ao clicar. Durante
-/// arrastos cresce e vira alvo de drop com anel tracejado.
+/// flutuante), com um leve pulso ao clicar. Durante arrastos vira
+/// alvo de drop com anel tracejado e cresce SÓ visualmente
+/// (scaleEffect) — a caixa de layout não muda, então o resto do
+/// cabeçalho fica parado.
 private struct FicharioBubble: View {
     @ObservedObject private var themeStore = ThemeStore.shared
 
@@ -1099,16 +1127,15 @@ private struct FicharioBubble: View {
     let dragActive: Bool
     var action: () -> Void
 
-    @State private var bursting = false
-    @State private var burst: CGFloat = 0
+    @State private var popping = false
 
-    private var diameter: CGFloat {
-        (dropTargeted ? 40 : (dragActive ? 34 : 28)) * scale
+    private var visualScale: CGFloat {
+        dropTargeted ? 1.35 : (dragActive ? 1.1 : 1)
     }
 
     var body: some View {
         Button {
-            playBurst()
+            playPop()
             action()
         } label: {
             Image(systemName: isOpen ? "book.fill" : "book")
@@ -1116,7 +1143,7 @@ private struct FicharioBubble: View {
                 .foregroundStyle(
                     dropTargeted || dragActive ? Theme.accent : Color.primary
                 )
-                .frame(width: diameter, height: diameter)
+                .frame(width: 28 * scale, height: 28 * scale)
                 .contentShape(Circle())
         }
         .buttonStyle(.borderless)
@@ -1132,34 +1159,7 @@ private struct FicharioBubble: View {
                 )
                 .opacity(dragActive || dropTargeted ? 1 : 0)
         )
-        // Brilho do clique: anel irisado que escapa da bolha e some,
-        // com um lampejo de sparkles no ombro.
-        .overlay(
-            Circle()
-                .strokeBorder(
-                    AngularGradient(
-                        colors: [.cyan, .purple, .white, Theme.accent, .cyan],
-                        center: .center
-                    ),
-                    lineWidth: 1.5
-                )
-                .scaleEffect(0.7 + burst * 1.2)
-                .opacity(bursting ? Double(1 - burst) : 0)
-                .allowsHitTesting(false)
-        )
-        .overlay(alignment: .topTrailing) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 8 * scale, weight: .semibold))
-                .foregroundStyle(.white)
-                .shadow(color: Theme.accent.opacity(0.8), radius: 2)
-                .offset(x: 3 * scale, y: -3 * scale)
-                .opacity(bursting ? Double(1 - burst) : 0)
-                .scaleEffect(0.6 + burst * 0.8)
-                .allowsHitTesting(false)
-        }
-        .scaleEffect(bursting ? 1.08 : 1)
-        // Crescimento com mola viva; retorno criticamente amortecido —
-        // os vizinhos refluem na mesma curva.
+        .scaleEffect(visualScale * (popping ? 1.1 : 1))
         .animation(
             dropTargeted
                 ? .spring(response: 0.28, dampingFraction: 0.74)
@@ -1172,17 +1172,15 @@ private struct FicharioBubble: View {
                 : .spring(response: 0.5, dampingFraction: 1.0),
             value: dragActive
         )
-        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: bursting)
+        .animation(.spring(response: 0.26, dampingFraction: 0.62), value: popping)
+        .zIndex(10)
     }
 
-    private func playBurst() {
-        burst = 0
-        bursting = true
-        withAnimation(.easeOut(duration: 0.55)) { burst = 1 }
+    private func playPop() {
+        popping = true
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            bursting = false
-            burst = 0
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            popping = false
         }
     }
 
@@ -1217,10 +1215,10 @@ private struct FicharioBubble: View {
     }
 }
 
-/// Abertura "mágica" do fichário: o conteúdo emerge desembaçando,
-/// crescendo a partir da bolha (canto superior esquerdo) e descendo
-/// suave — tudo numa curva só.
-struct MagicRevealModifier: ViewModifier, Animatable {
+/// Abertura do fichário: um círculo que nasce na bolha e se expande
+/// até revelar o painel inteiro; fechar encolhe de volta (a mesma
+/// animação, invertida pelo próprio SwiftUI).
+private struct CircleRevealModifier: ViewModifier, Animatable {
     var progress: CGFloat
 
     var animatableData: CGFloat {
@@ -1230,21 +1228,57 @@ struct MagicRevealModifier: ViewModifier, Animatable {
 
     func body(content: Content) -> some View {
         content
-            .opacity(Double(progress))
-            .scaleEffect(0.9 + 0.1 * progress, anchor: .topLeading)
-            .blur(radius: (1 - progress) * 7)
-            .offset(y: (1 - progress) * -12)
+            .clipShape(RevealCircle(progress: progress))
+            .opacity(progress < 0.12 ? Double(progress / 0.12) : 1)
     }
 }
 
-extension AnyTransition {
-    static var magicReveal: AnyTransition {
-        .asymmetric(
-            insertion: .modifier(
-                active: MagicRevealModifier(progress: 0),
-                identity: MagicRevealModifier(progress: 1)
-            ),
-            removal: .opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading))
-        )
+private struct RevealCircle: Shape {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        // Centro na posição aproximada da bolha (acima, à esquerda).
+        let center = CGPoint(x: rect.minX + 26, y: rect.minY - 20)
+        let reach = hypot(rect.width, rect.height) + 40
+        let radius = max(1, 10 + progress * reach)
+        return Path(ellipseIn: CGRect(
+            x: center.x - radius,
+            y: center.y - radius,
+            width: radius * 2,
+            height: radius * 2
+        ))
+    }
+}
+
+/// Brilho suave que respira ao longo das bordas do painel enquanto o
+/// fichário está aberto (cor de destaque; intensidade configurável).
+private struct FicharioEdgeGlow: View {
+    @ObservedObject private var themeStore = ThemeStore.shared
+    let intensity: Double
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.08)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let breathe = 0.82 + 0.18 * sin(t * 1.6)
+            ZStack {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(
+                        Theme.tint(min(1, 0.6 * intensity * breathe)),
+                        lineWidth: 1.2
+                    )
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(
+                        Theme.tint(min(1, 0.38 * intensity * breathe)),
+                        lineWidth: 5
+                    )
+                    .blur(radius: 6)
+            }
+        }
+        .allowsHitTesting(false)
     }
 }

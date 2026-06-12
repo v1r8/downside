@@ -20,9 +20,13 @@ enum SmartNamer {
             context += "\nConteúdo: \(line)"
         }
         let prompt = """
-        Sugira um nome curto e claro (2 a 6 palavras, em português, sem \
-        extensão, sem aspas, sem barras) que descreva este documento pelo \
-        conteúdo real. Responda APENAS com o nome:
+        Sugira um nome ESPECÍFICO e claro (3 a 8 palavras, em português, \
+        sem extensão, sem aspas, sem barras) que identifique este \
+        documento pelo conteúdo real, como uma pessoa o descreveria numa \
+        frase curta. CITE nomes próprios presentes no conteúdo — empresa, \
+        programa, pessoas, projeto, produto. NUNCA use genéricos como \
+        "relatório financeiro" ou "link da internet". Responda APENAS \
+        com o nome:
 
         \(context)
         """
@@ -38,7 +42,7 @@ enum SmartNamer {
             .replacingOccurrences(of: "/", with: " ")
             .replacingOccurrences(of: ":", with: " ")
         guard name.count > 2 else { return nil }
-        return String(name.prefix(48))
+        return String(name.prefix(64))
     }
 }
 

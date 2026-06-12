@@ -528,8 +528,12 @@ struct BulkActionPill: View {
     let scale: CGFloat
     var action: () -> Void
 
+    /// Só fica apagada quando o motor é "sempre Claude" e não há
+    /// chave — no automático/local, a LLM local cobre.
     private var needsKey: Bool {
-        (item.id == "resumo" || item.id == "chaves") && !ClaudeService.hasKey
+        (item.id == "resumo" || item.id == "chaves")
+            && Prefs.bulkAIEngine == 2
+            && !ClaudeService.hasKey
     }
 
     var body: some View {
@@ -649,12 +653,10 @@ private struct StackDetailContent: View {
                 try await runner.downloadLinks(from: $0)
             }
         case "resumo":
-            guard ClaudeService.hasKey else { return }
             runner.run("Resumindo…", stack: stack, panel: panel) {
                 try await runner.summarize($0)
             }
         case "chaves":
-            guard ClaudeService.hasKey else { return }
             runner.run("Caracterizando…", stack: stack, panel: panel) {
                 try await runner.keywords($0)
             }

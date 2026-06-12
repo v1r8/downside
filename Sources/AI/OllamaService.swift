@@ -36,16 +36,20 @@ enum OllamaService {
         }
     }
 
-    static func generate(prompt: String, model: String = Prefs.ollamaModel) async throws -> String {
+    static func generate(
+        prompt: String,
+        model: String = Prefs.ollamaModel,
+        numPredict: Int = 80
+    ) async throws -> String {
         var request = URLRequest(url: base.appendingPathComponent("api/generate"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
-        request.timeoutInterval = 60
+        request.timeoutInterval = 180
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": model,
             "prompt": prompt,
             "stream": false,
-            "options": ["temperature": 0.3, "num_predict": 60],
+            "options": ["temperature": 0.3, "num_predict": numPredict],
         ])
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200,
@@ -98,6 +102,17 @@ enum OllamaService {
             .components(separatedBy: .newlines).first?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"'.")) ?? ""
-        return title.isEmpty ? nil : String(title.prefix(60))
+        return title.isEmpty ? nil : String(title.prefix(90))
+    }
+
+    /// Resposta longa (resumos, palavras-chave) — nil se indisponível.
+    static func completeLong(prompt: String, numPredict: Int = 1200) async -> String? {
+        let model = Prefs.ollamaModel
+        guard await isRunning(), await hasModel(model) else { return nil }
+        guard let raw = try? await generate(
+            prompt: prompt, model: model, numPredict: numPredict
+        ) else { return nil }
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 }

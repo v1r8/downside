@@ -34,6 +34,8 @@ final class BulkActionRunner: ObservableObject {
                     StackHistoryStore.shared.archiveAndName(updated)
                 }
                 message = outputs.isEmpty ? "Nada para processar" : "Concluído ✓"
+            } catch is AIChain.ChainError {
+                message = "Precisa de IA: Ollama local ou chave do Claude"
             } catch {
                 message = "Não foi possível concluir"
             }
@@ -63,6 +65,8 @@ final class BulkActionRunner: ObservableObject {
                 let outputs = try await action(stack)
                 StackHistoryStore.shared.appendOutputs(entry.id, urls: outputs)
                 message = outputs.isEmpty ? "Nada para processar" : "Concluído ✓"
+            } catch is AIChain.ChainError {
+                message = "Precisa de IA: Ollama local ou chave do Claude"
             } catch {
                 message = "Não foi possível concluir"
             }
@@ -148,34 +152,53 @@ final class BulkActionRunner: ObservableObject {
         return results
     }
 
-    /// Resumo do conteúdo textual da pilha via Claude.
+    /// Resumo do conteúdo textual da pilha — cadeia de IA conforme as
+    /// configurações (local primeiro/Claude/só local) e profundidade
+    /// configurável (denso com bullets ou curto).
     func summarize(_ stack: FileStack) async throws -> [URL] {
         let text = gatherText(from: stack)
         guard !text.isEmpty else { return [] }
-        let summary = try await ClaudeService.complete(
-            prompt: """
+        let prompt: String
+        if Prefs.summaryDepth >= 2 {
+            prompt = """
+            Produza um RESUMO DENSO em português, em markdown, dos \
+            documentos a seguir:
+            1. Comece com "# Resumo" e uma visão geral de 2 a 3 frases.
+            2. Liste os pontos principais em bullet points densos, \
+            citando os dados, números, datas, nomes e decisões que \
+            aparecem no texto.
+            3. Inclua uma seção "## Nomes e entidades" com as pessoas, \
+            empresas, produtos e programas citados.
+            4. Termine com uma linha "Em uma frase: …".
+
+            \(text)
+            """
+        } else {
+            prompt = """
             Resuma em português, em tópicos claros e curtos, o conteúdo \
             dos documentos a seguir. Termine com uma linha "Em uma frase: …".
 
             \(text)
             """
-        )
+        }
+        let summary = try await AIChain.complete(prompt: prompt, maxTokens: 1800)
         return [write(summary, name: "Resumo \(stamp())")]
     }
 
-    /// Caracterização em palavras-chave via Claude.
+    /// Caracterização em palavras-chave — mesma cadeia de IA.
     func keywords(_ stack: FileStack) async throws -> [URL] {
         let text = gatherText(from: stack)
         guard !text.isEmpty else { return [] }
-        let result = try await ClaudeService.complete(
+        let count = Prefs.keywordCount
+        let result = try await AIChain.complete(
             prompt: """
-            Caracterize os documentos a seguir em 8 a 12 palavras-chave \
-            em português (uma por linha, sem numeração), seguidas de uma \
-            frase única de caracterização geral.
+            Caracterize os documentos a seguir em \(count) a \(count + 2) \
+            palavras-chave em português (uma por linha, sem numeração), \
+            seguidas de uma frase única de caracterização geral.
 
             \(text)
             """,
-            maxTokens: 400
+            maxTokens: 500
         )
         return [write(result, name: "Palavras-chave \(stamp())")]
     }

@@ -26,10 +26,14 @@ enum TitlePrompt {
         }
 
         return """
-        Dê um título curto (3 a 6 palavras, em português, sem aspas nem \
-        pontuação final) que descreva o tema comum destes arquivos. \
-        Baseie-se no CONTEÚDO analisado — não repita simplesmente os \
-        nomes dos arquivos. Responda APENAS com o título:
+        Escreva um título ESPECÍFICO e informativo (5 a 10 palavras, em \
+        português, sem aspas nem pontuação final) que identifique estes \
+        arquivos como uma pessoa resumiria numa frase curta. CITE os \
+        nomes próprios que aparecem no conteúdo — empresa, programa, \
+        pessoas, projeto, produto (ex.: "Podcast Outliers com a Genoa \
+        Capital", "Demonstrações financeiras da Vale 2T26"). NUNCA use \
+        genéricos como "relatório financeiro", "link da internet" ou \
+        "documentos diversos". Responda APENAS com o título:
 
         \(names)\(excerpts.isEmpty ? "" : "\n\nConteúdo analisado:\(excerpts)")
         """
@@ -41,10 +45,10 @@ enum TitlePrompt {
         let ext = url.pathExtension.lowercased()
 
         // Links: o conteúdo É a página. Com profundidade, busca o
-        // título real (vídeo do YouTube, artigo etc.).
+        // título real + canal/autor + descrição (vídeo, artigo etc.).
         if ext == "webloc", let link = LinkPeek.url(fromWebloc: url) {
-            if deep, let title = await LinkPeek.pageTitle(for: link) {
-                return "\(url.lastPathComponent) (link): \"\(title)\" — \(link.absoluteString.prefix(90))"
+            if deep, let summary = await LinkPeek.pageSummary(for: link) {
+                return "\(url.lastPathComponent) (link): \(summary) — \(link.absoluteString.prefix(90))"
             }
             return "\(url.lastPathComponent) (link): \(link.absoluteString.prefix(120))"
         }
@@ -53,10 +57,10 @@ enum TitlePrompt {
 
         if textExtensions.contains(ext),
            let content = try? String(contentsOf: url, encoding: .utf8) {
-            return "\(url.lastPathComponent): \(condense(content, limit: 400))"
+            return "\(url.lastPathComponent): \(condense(content, limit: 1000))"
         }
         if ext == "pdf", let content = PDFDocument(url: url)?.string {
-            return "\(url.lastPathComponent) (PDF): \(condense(content, limit: 700))"
+            return "\(url.lastPathComponent) (PDF): \(condense(content, limit: 1600))"
         }
         if imageExtensions.contains(ext) {
             let labels = await imageLabels(url)
@@ -102,7 +106,9 @@ enum LinkPeek {
         return URL(string: raw)
     }
 
-    static func pageTitle(for link: URL) async -> String? {
+    /// Resumo da página: título + canal/autor (YouTube via oEmbed) ou
+    /// título + descrição (og:description / meta description).
+    static func pageSummary(for link: URL) async -> String? {
         let host = link.host?.lowercased() ?? ""
         if host.contains("youtube.com") || host.contains("youtu.be"),
            let encoded = link.absoluteString.addingPercentEncoding(
@@ -114,7 +120,9 @@ enum LinkPeek {
             if let (data, _) = try? await URLSession.shared.data(for: request),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let title = json["title"] as? String, !title.isEmpty {
-                return String(title.prefix(120))
+                let author = (json["author_name"] as? String) ?? ""
+                let suffix = author.isEmpty ? "" : " (vídeo do canal \(author))"
+                return "\"\(String(title.prefix(140)))\"\(suffix)"
             }
         }
 
@@ -124,16 +132,39 @@ enum LinkPeek {
         guard let (data, _) = try? await URLSession.shared.data(for: request) else {
             return nil
         }
-        let html = String(decoding: data.prefix(160_000), as: UTF8.self)
-        guard let range = html.range(
-            of: "<title[^>]*>[^<]{1,300}</title>",
-            options: [.regularExpression, .caseInsensitive]
+        let html = String(decoding: data.prefix(220_000), as: UTF8.self)
+
+        var parts: [String] = []
+        if let title = firstMatch(in: html, pattern: "<title[^>]*>([^<]{1,300})</title>") {
+            parts.append("\"\(String(title.prefix(140)))\"")
+        }
+        let description = firstMatch(
+            in: html,
+            pattern: "<meta[^>]+(?:property=[\"']og:description[\"']|name=[\"']description[\"'])[^>]+content=[\"']([^\"']{1,400})[\"']"
+        ) ?? firstMatch(
+            in: html,
+            pattern: "<meta[^>]+content=[\"']([^\"']{1,400})[\"'][^>]+(?:property=[\"']og:description[\"']|name=[\"']description[\"'])"
+        )
+        if let description {
+            parts.append(String(description.prefix(220)))
+        }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " — ")
+    }
+
+    /// Primeiro grupo de captura do padrão, com entidades decodificadas.
+    private static func firstMatch(in html: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(
+            pattern: pattern, options: [.caseInsensitive]
         ) else { return nil }
-        let title = String(html[range])
-            .replacingOccurrences(of: "<title[^>]*>", with: "", options: [.regularExpression, .caseInsensitive])
-            .replacingOccurrences(of: "</title>", with: "", options: .caseInsensitive)
-        let clean = decodeEntities(title).trimmingCharacters(in: .whitespacesAndNewlines)
-        return clean.isEmpty ? nil : String(clean.prefix(120))
+        let range = NSRange(html.startIndex..., in: html)
+        guard let match = regex.firstMatch(in: html, range: range),
+              match.numberOfRanges > 1,
+              let captured = Range(match.range(at: 1), in: html)
+        else { return nil }
+        let clean = decodeEntities(String(html[captured]))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean.isEmpty ? nil : clean
     }
 
     private static func decodeEntities(_ text: String) -> String {
@@ -173,7 +204,25 @@ enum LocalNamer {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\"'.")) ?? ""
             guard !title.isEmpty else { return nil }
-            return String(title.prefix(60))
+            return String(title.prefix(90))
+        } catch {
+            return nil
+        }
+        #else
+        return nil
+        #endif
+    }
+
+    /// Resposta longa (resumos etc.), sem truncar na primeira linha.
+    static func completeLong(prompt: String) async -> String? {
+        #if compiler(>=6.2)
+        guard #available(macOS 26.0, *) else { return nil }
+        guard SystemLanguageModel.default.availability == .available else { return nil }
+        do {
+            let session = LanguageModelSession()
+            let response = try await session.respond(to: prompt)
+            let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : text
         } catch {
             return nil
         }

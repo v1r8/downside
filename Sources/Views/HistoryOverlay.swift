@@ -17,7 +17,6 @@ struct HistoryOverlay: View {
     @State private var expandedEntry: UUID?
     @State private var renamingEntry: UUID?
     @State private var renameText = ""
-    @State private var revealGlow = false
     @StateObject private var runner = BulkActionRunner()
     @ObservedObject private var actionConfig = BulkActionConfigStore.shared
     @AppStorage(PrefKey.historyLayout) private var layoutRaw = 1
@@ -195,22 +194,6 @@ struct HistoryOverlay: View {
             }
         }
         .padding(10 * scale)
-        // Varredura holográfica que acompanha a abertura do fichário
-        // e se dissolve — o toque mágico do reveal.
-        .overlay {
-            if revealGlow {
-                HoloShimmer(cornerRadius: 14)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
-        }
-        .onAppear {
-            revealGlow = true
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 1_100_000_000)
-                withAnimation(.easeOut(duration: 0.6)) { revealGlow = false }
-            }
-        }
         .animation(.spring(response: 0.3, dampingFraction: 0.82), value: expandedEntry)
         .animation(.spring(response: 0.3, dampingFraction: 0.82), value: selection)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: layoutRaw)
@@ -781,12 +764,10 @@ struct HistoryOverlay: View {
                 try await runner.downloadLinks(from: $0)
             }
         case "resumo":
-            guard ClaudeService.hasKey else { return }
             runner.runArchived("Resumindo…", entry: entry) {
                 try await runner.summarize($0)
             }
         case "chaves":
-            guard ClaudeService.hasKey else { return }
             runner.runArchived("Caracterizando…", entry: entry) {
                 try await runner.keywords($0)
             }

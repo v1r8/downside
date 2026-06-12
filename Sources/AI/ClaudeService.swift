@@ -60,8 +60,35 @@ enum ClaudeService {
         let title = (try? await complete(
             prompt: prompt,
             model: "claude-haiku-4-5-20251001",
-            maxTokens: 60
+            maxTokens: 100
         )) ?? fallback
         return title.isEmpty ? fallback : title
+    }
+}
+
+/// Cadeia de IA para tarefas LONGAS (resumos, palavras-chave):
+/// respeita o motor escolhido nas configurações — automático (local
+/// primeiro, Claude de reserva), sempre Claude ou só local.
+enum AIChain {
+    enum ChainError: Error {
+        case unavailable
+    }
+
+    static func complete(prompt: String, maxTokens: Int = 1500) async throws -> String {
+        let engine = Prefs.bulkAIEngine
+        if engine != 2 {
+            if let local = await LocalNamer.completeLong(prompt: prompt) {
+                return local
+            }
+            if let ollama = await OllamaService.completeLong(
+                prompt: prompt, numPredict: maxTokens
+            ) {
+                return ollama
+            }
+        }
+        if engine != 3, ClaudeService.hasKey {
+            return try await ClaudeService.complete(prompt: prompt, maxTokens: maxTokens)
+        }
+        throw ChainError.unavailable
     }
 }

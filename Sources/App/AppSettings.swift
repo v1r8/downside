@@ -153,6 +153,13 @@ enum PrefKey {
     static let historyLayout = "historyLayout"
     static let ollamaModel = "ollamaModel"
     static let smartNames = "smartNames"
+    static let ficharioRevealStyle = "ficharioRevealStyle"
+    static let ficharioRevealSpeed = "ficharioRevealSpeed"
+    static let ficharioGlow = "ficharioGlow"
+    static let ficharioGlowIntensity = "ficharioGlowIntensity"
+    static let bulkAIEngine = "bulkAIEngine"
+    static let summaryDepth = "summaryDepth"
+    static let keywordCount = "keywordCount"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -324,6 +331,49 @@ enum Prefs {
     static var historyLayout: Int {
         let value = UserDefaults.standard.integer(forKey: PrefKey.historyLayout)
         return (1...6).contains(value) ? value : 1
+    }
+
+    /// Abertura do fichário: 1 = expansão a partir do botão;
+    /// 2 = desvanecer; 3 = instantânea.
+    static var ficharioRevealStyle: Int {
+        let value = UserDefaults.standard.integer(forKey: PrefKey.ficharioRevealStyle)
+        return (1...3).contains(value) ? value : 1
+    }
+
+    /// Duração da animação de abertura/fechamento do fichário.
+    static var ficharioRevealSpeed: Double {
+        let value = UserDefaults.standard.double(forKey: PrefKey.ficharioRevealSpeed)
+        return (0.15...0.7).contains(value) ? value : 0.32
+    }
+
+    /// Brilho suave nas bordas do painel enquanto o fichário está aberto.
+    static var ficharioGlowEnabled: Bool {
+        UserDefaults.standard.object(forKey: PrefKey.ficharioGlow) as? Bool ?? true
+    }
+
+    static var ficharioGlowIntensity: Double {
+        let value = UserDefaults.standard.double(forKey: PrefKey.ficharioGlowIntensity)
+        return (0.3...1.5).contains(value) ? value : 0.8
+    }
+
+    /// Motor das ações de IA (resumo/palavras-chave): 1 = automático
+    /// (local primeiro, Claude de reserva); 2 = sempre Claude;
+    /// 3 = só local.
+    static var bulkAIEngine: Int {
+        let value = UserDefaults.standard.integer(forKey: PrefKey.bulkAIEngine)
+        return (1...3).contains(value) ? value : 1
+    }
+
+    /// Resumo: 1 = curto; 2 = denso com bullets e entidades.
+    static var summaryDepth: Int {
+        let value = UserDefaults.standard.integer(forKey: PrefKey.summaryDepth)
+        return (1...2).contains(value) ? value : 2
+    }
+
+    /// Quantidade alvo de palavras-chave.
+    static var keywordCount: Int {
+        let value = UserDefaults.standard.integer(forKey: PrefKey.keywordCount)
+        return (5...20).contains(value) ? value : 10
     }
 
     /// Nomeação inteligente de docs/clipboard pela LLM local (apelidos
