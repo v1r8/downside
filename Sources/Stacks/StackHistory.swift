@@ -9,6 +9,10 @@ struct ArchivedStack: Identifiable, Codable, Equatable {
     var paths: [String]
     var outputPaths: [String]
     var hadBulkAction: Bool
+    /// Opcional para decodificar fichários antigos sem o campo.
+    var favorite: Bool? = nil
+
+    var isFavorite: Bool { favorite ?? false }
 
     var urls: [URL] { paths.map { URL(fileURLWithPath: $0) } }
     var outputs: [URL] { outputPaths.map { URL(fileURLWithPath: $0) } }
@@ -85,6 +89,12 @@ final class StackHistoryStore: ObservableObject {
     func rename(_ id: UUID, to title: String) {
         guard let index = archived.firstIndex(where: { $0.id == id }) else { return }
         archived[index].title = title
+        save()
+    }
+
+    func toggleFavorite(_ id: UUID) {
+        guard let index = archived.firstIndex(where: { $0.id == id }) else { return }
+        archived[index].favorite = !archived[index].isFavorite
         save()
     }
 

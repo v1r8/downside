@@ -17,6 +17,7 @@ struct HistoryOverlay: View {
     @State private var expandedEntry: UUID?
     @State private var renamingEntry: UUID?
     @State private var renameText = ""
+    @State private var revealGlow = false
     @StateObject private var runner = BulkActionRunner()
     @ObservedObject private var actionConfig = BulkActionConfigStore.shared
     @AppStorage(PrefKey.historyLayout) private var layoutRaw = 1
@@ -61,6 +62,16 @@ struct HistoryOverlay: View {
                 .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
             return haystack.contains(needle)
         }
+    }
+
+    /// Seção de favoritas no topo; o resto vem abaixo (se não há
+    /// favoritas, a lista fica como sempre foi, sem cabeçalhos).
+    private var favoriteEntries: [ArchivedStack] {
+        filtered.filter(\.isFavorite)
+    }
+
+    private var regularEntries: [ArchivedStack] {
+        favoriteEntries.isEmpty ? filtered : filtered.filter { !$0.isFavorite }
     }
 
     var body: some View {
@@ -111,36 +122,56 @@ struct HistoryOverlay: View {
                     switch layout {
                     case .list:
                         LazyVStack(spacing: 4 * scale) {
-                            ForEach(filtered) { entry in
+                            if !favoriteEntries.isEmpty {
+                                sectionHeader("Favoritas", icon: "star.fill")
+                                ForEach(favoriteEntries) { entry in
+                                    card(entry)
+                                }
+                                sectionHeader("Todas")
+                            }
+                            ForEach(regularEntries) { entry in
                                 card(entry)
                             }
                         }
                     case .compact:
                         LazyVStack(spacing: 2) {
-                            ForEach(filtered) { entry in
+                            if !favoriteEntries.isEmpty {
+                                sectionHeader("Favoritas", icon: "star.fill")
+                                ForEach(favoriteEntries) { entry in
+                                    compactRow(entry)
+                                }
+                                sectionHeader("Todas")
+                            }
+                            ForEach(regularEntries) { entry in
                                 compactRow(entry)
                             }
                         }
                     case .grid:
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 140 * scale, maximum: 190 * scale), spacing: 6 * scale)],
-                            spacing: 6 * scale
-                        ) {
-                            ForEach(filtered) { entry in
-                                gridTile(entry)
+                        LazyVStack(spacing: 6 * scale) {
+                            if !favoriteEntries.isEmpty {
+                                sectionHeader("Favoritas", icon: "star.fill")
+                                historyGrid(favoriteEntries, minimum: 140, maximum: 190)
+                                sectionHeader("Todas")
                             }
+                            historyGrid(regularEntries, minimum: 140, maximum: 190)
                         }
                     case .mosaic:
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 64 * scale, maximum: 84 * scale), spacing: 6 * scale)],
-                            spacing: 6 * scale
-                        ) {
-                            ForEach(filtered) { entry in
-                                mosaicTile(entry)
+                        LazyVStack(spacing: 6 * scale) {
+                            if !favoriteEntries.isEmpty {
+                                sectionHeader("Favoritas", icon: "star.fill")
+                                historyGrid(favoriteEntries, minimum: 64, maximum: 84, mosaic: true)
+                                sectionHeader("Todas")
                             }
+                            historyGrid(regularEntries, minimum: 64, maximum: 84, mosaic: true)
                         }
                     case .timeline:
                         LazyVStack(spacing: 4 * scale) {
+                            if !favoriteEntries.isEmpty {
+                                sectionHeader("Favoritas", icon: "star.fill")
+                                ForEach(favoriteEntries) { entry in
+                                    card(entry)
+                                }
+                            }
                             ForEach(timelineGroups, id: \.0) { group in
                                 sectionHeader(group.0)
                                 ForEach(group.1) { entry in
@@ -150,16 +181,13 @@ struct HistoryOverlay: View {
                         }
                     case .shelves:
                         LazyVStack(alignment: .leading, spacing: 8 * scale) {
+                            if !favoriteEntries.isEmpty {
+                                sectionHeader("Favoritas", icon: "star.fill")
+                                shelfRow(favoriteEntries)
+                            }
                             ForEach(shelfGroups, id: \.0) { group in
                                 sectionHeader(group.0)
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 6 * scale) {
-                                        ForEach(group.1) { entry in
-                                            gridTile(entry)
-                                                .frame(width: 150 * scale)
-                                        }
-                                    }
-                                }
+                                shelfRow(group.1)
                             }
                         }
                     }
@@ -167,6 +195,22 @@ struct HistoryOverlay: View {
             }
         }
         .padding(10 * scale)
+        // Varredura holográfica que acompanha a abertura do fichário
+        // e se dissolve — o toque mágico do reveal.
+        .overlay {
+            if revealGlow {
+                HoloShimmer(cornerRadius: 14)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .onAppear {
+            revealGlow = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_100_000_000)
+                withAnimation(.easeOut(duration: 0.6)) { revealGlow = false }
+            }
+        }
         .animation(.spring(response: 0.3, dampingFraction: 0.82), value: expandedEntry)
         .animation(.spring(response: 0.3, dampingFraction: 0.82), value: selection)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: layoutRaw)
@@ -190,7 +234,7 @@ struct HistoryOverlay: View {
             return "Anteriores"
         }
         let order = ["Hoje", "Ontem", "Esta semana", "Este mês", "Anteriores"]
-        let grouped = Dictionary(grouping: filtered) { bucket($0.date) }
+        let grouped = Dictionary(grouping: regularEntries) { bucket($0.date) }
         return order.compactMap { key in
             grouped[key].map { (key, $0) }
         }
@@ -203,7 +247,7 @@ struct HistoryOverlay: View {
         formatter.locale = Locale(identifier: "pt_BR")
         var seen: [String] = []
         var grouped: [String: [ArchivedStack]] = [:]
-        for entry in filtered {
+        for entry in regularEntries {
             let key = formatter.string(from: entry.date).capitalized
             if grouped[key] == nil { seen.append(key) }
             grouped[key, default: []].append(entry)
@@ -211,12 +255,51 @@ struct HistoryOverlay: View {
         return seen.map { ($0, grouped[$0] ?? []) }
     }
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 10 * scale, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 4 * scale)
+    private func sectionHeader(_ title: String, icon: String? = nil) -> some View {
+        HStack(spacing: 4 * scale) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 8.5 * scale))
+                    .foregroundStyle(.yellow)
+            }
+            Text(title)
+        }
+        .font(.system(size: 10 * scale, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4 * scale)
+    }
+
+    /// Grade reaproveitada pelas seções (favoritas + todas).
+    private func historyGrid(
+        _ entries: [ArchivedStack],
+        minimum: CGFloat,
+        maximum: CGFloat,
+        mosaic: Bool = false
+    ) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: minimum * scale, maximum: maximum * scale), spacing: 6 * scale)],
+            spacing: 6 * scale
+        ) {
+            ForEach(entries) { entry in
+                if mosaic {
+                    mosaicTile(entry)
+                } else {
+                    gridTile(entry)
+                }
+            }
+        }
+    }
+
+    private func shelfRow(_ entries: [ArchivedStack]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6 * scale) {
+                ForEach(entries) { entry in
+                    gridTile(entry)
+                        .frame(width: 150 * scale)
+                }
+            }
+        }
     }
 
     // MARK: - Ficha
@@ -290,6 +373,16 @@ struct HistoryOverlay: View {
         .frame(width: size * 1.7 * scale, alignment: .leading)
     }
 
+    /// Estrelinha de favorita (indicador discreto junto ao título).
+    @ViewBuilder
+    private func favStar(_ entry: ArchivedStack) -> some View {
+        if entry.isFavorite {
+            Image(systemName: "star.fill")
+                .font(.system(size: 8 * scale))
+                .foregroundStyle(.yellow)
+        }
+    }
+
     @ViewBuilder
     private func bulkStar(_ entry: ArchivedStack) -> some View {
         if entry.hadBulkAction, Prefs.bulkBadgeStyle == 2 {
@@ -345,6 +438,7 @@ struct HistoryOverlay: View {
         let isExpanded = expandedEntry == entry.id
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6 * scale) {
+                favStar(entry)
                 bulkStar(entry)
                 entryTitle(entry, size: 11)
                 bulkDot(entry)
@@ -381,6 +475,7 @@ struct HistoryOverlay: View {
         let isSelected = selection.contains(entry.id)
         return VStack(spacing: 5 * scale) {
             HStack(spacing: 4 * scale) {
+                favStar(entry)
                 bulkStar(entry)
                 fan(entry, size: 26)
             }
@@ -415,6 +510,7 @@ struct HistoryOverlay: View {
         let isSelected = selection.contains(entry.id)
         return VStack(spacing: 3 * scale) {
             HStack(spacing: 3 * scale) {
+                favStar(entry)
                 bulkStar(entry)
                 fan(entry, size: 22)
             }
@@ -533,6 +629,18 @@ struct HistoryOverlay: View {
                     onDragEnded: { panel.isDraggingFromPanel = false }
                 )
             )
+
+            // Favoritar direto da ficha: a estrela fica fora da camada
+            // de interação, então o clique não expande a ficha.
+            Button {
+                store.toggleFavorite(entry.id)
+            } label: {
+                Image(systemName: entry.isFavorite ? "star.fill" : "star")
+                    .font(.system(size: 9 * scale))
+                    .foregroundStyle(entry.isFavorite ? Color.yellow : Color.secondary.opacity(0.55))
+            }
+            .buttonStyle(.borderless)
+            .help(entry.isFavorite ? "Remover dos favoritos" : "Favoritar")
 
             Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                 .font(.system(size: 8 * scale, weight: .semibold))
@@ -733,6 +841,13 @@ struct HistoryOverlay: View {
         menu.addItem(ActionMenuItem(title: "Gerar título com IA") {
             Task { @MainActor in
                 StackHistoryStore.shared.regenerateTitle(entry)
+            }
+        })
+        menu.addItem(ActionMenuItem(
+            title: entry.isFavorite ? "Remover dos favoritos" : "Favoritar"
+        ) {
+            Task { @MainActor in
+                StackHistoryStore.shared.toggleFavorite(entry.id)
             }
         })
         menu.addItem(.separator())

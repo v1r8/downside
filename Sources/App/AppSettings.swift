@@ -152,6 +152,7 @@ enum PrefKey {
     static let holoCardFront = "holoCardFront"
     static let historyLayout = "historyLayout"
     static let ollamaModel = "ollamaModel"
+    static let smartNames = "smartNames"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -323,6 +324,12 @@ enum Prefs {
     static var historyLayout: Int {
         let value = UserDefaults.standard.integer(forKey: PrefKey.historyLayout)
         return (1...6).contains(value) ? value : 1
+    }
+
+    /// Nomeação inteligente de docs/clipboard pela LLM local (apelidos
+    /// visuais — os arquivos no disco não mudam).
+    static var smartNamesEnabled: Bool {
+        UserDefaults.standard.object(forKey: PrefKey.smartNames) as? Bool ?? true
     }
 
     /// Modelo do Ollama para nomeação local.

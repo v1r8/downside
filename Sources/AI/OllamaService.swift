@@ -86,11 +86,11 @@ enum OllamaService {
         }
     }
 
-    /// Título via Ollama (nil se indisponível ou falhar).
-    static func stackTitle(for urls: [URL]) async -> String? {
+    /// Resposta curta de uma linha (títulos/nomes) — nil se o Ollama
+    /// não estiver rodando ou o modelo não estiver baixado.
+    static func completeShort(prompt: String) async -> String? {
         let model = Prefs.ollamaModel
         guard await isRunning(), await hasModel(model) else { return nil }
-        let prompt = await TitlePrompt.build(for: urls)
         guard let raw = try? await generate(prompt: prompt, model: model) else {
             return nil
         }

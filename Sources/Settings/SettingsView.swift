@@ -493,6 +493,7 @@ private struct AISettingsTab: View {
     @State private var apiKey = Prefs.claudeAPIKey ?? ""
     @AppStorage(PrefKey.stackTitleDetail) private var titleDetail = 1
     @AppStorage(PrefKey.ollamaModel) private var ollamaModel = "llama3.2:3b"
+    @AppStorage(PrefKey.smartNames) private var smartNames = true
 
     @State private var ollamaStatus = "Verificando…"
     @State private var pullStatus: String?
@@ -509,6 +510,22 @@ private struct AISettingsTab: View {
                         ? "Disponível ✓ (no aparelho, grátis)"
                         : "Indisponível (requer macOS 26 com Apple Intelligence)")
                         .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Nomes inteligentes") {
+                Toggle("Nomear documentos e clipboard com IA local", isOn: $smartNames)
+                Text("""
+                A LLM local (Apple Intelligence ou Ollama) lê o conteúdo e \
+                dá um apelido legível aos docs — só na interface do \
+                Downside; os arquivos no disco NÃO mudam. O tipo (PDF, \
+                PNG, LINK…) vira uma etiqueta ao lado do título. Clique \
+                com o botão direito num doc para forçar ou desfazer um nome.
+                """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Button("Esquecer nomes gerados") {
+                    SmartNameStore.shared.resetAll()
                 }
             }
 

@@ -1,8 +1,35 @@
 import SwiftUI
 import AppKit
 
+/// Etiqueta de tipo de arquivo (PDF, PNG, LINK…) — pílula discreta à
+/// direita do título quando os nomes inteligentes estão ligados.
+struct TypeTag: View {
+    let text: String
+    var scale: CGFloat = 1
+    var onDark: Bool = false
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 7 * scale, weight: .bold))
+            .foregroundStyle(onDark ? Color.white.opacity(0.75) : Color.secondary)
+            .padding(.horizontal, 4 * scale)
+            .padding(.vertical, 1.2 * scale)
+            .background(
+                Capsule().fill(onDark ? Color.white.opacity(0.14) : Color.primary.opacity(0.07))
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    (onDark ? Color.white : Color.primary).opacity(0.12),
+                    lineWidth: 0.5
+                )
+            )
+            .fixedSize()
+    }
+}
+
 struct FileCell: View {
     @ObservedObject private var themeStore = ThemeStore.shared
+    @ObservedObject private var smart = SmartNameStore.shared
 
     let item: FileItem
     let isSelected: Bool
@@ -14,12 +41,22 @@ struct FileCell: View {
             ThumbnailView(url: item.url)
                 .frame(width: 60 * scale, height: 60 * scale)
 
-            Text(item.name)
-                .font(.system(size: 11 * scale))
-                .lineLimit(2)
-                .truncationMode(.middle)
-                .multilineTextAlignment(.center)
+            if smart.isPending(item) {
+                MagicNamePlaceholder(scale: scale * 0.8)
+                    .frame(maxWidth: .infinity)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 4 * scale) {
+                    Text(smart.title(for: item))
+                        .font(.system(size: 11 * scale))
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .multilineTextAlignment(.center)
+                    if let tag = smart.tag(for: item) {
+                        TypeTag(text: tag, scale: scale)
+                    }
+                }
                 .frame(maxWidth: .infinity)
+            }
         }
         .padding(.vertical, 8 * scale)
         .padding(.horizontal, 4 * scale)
@@ -40,6 +77,8 @@ struct FileCell: View {
 
 /// Linha do modo Lista: preview pequeno + nome + tamanho e data.
 struct FileRow: View {
+    @ObservedObject private var smart = SmartNameStore.shared
+
     let item: FileItem
     let isSelected: Bool
     var scale: CGFloat = 1
@@ -63,10 +102,19 @@ struct FileRow: View {
                 .frame(width: 28 * scale, height: 28 * scale)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(item.name)
-                    .font(.system(size: 12 * scale))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if smart.isPending(item) {
+                    MagicNamePlaceholder(scale: scale * 0.8)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 4 * scale) {
+                        Text(smart.title(for: item))
+                            .font(.system(size: 12 * scale))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if let tag = smart.tag(for: item) {
+                            TypeTag(text: tag, scale: scale)
+                        }
+                    }
+                }
                 Text(detail)
                     .font(.system(size: 10 * scale))
                     .foregroundStyle(.secondary)
@@ -101,31 +149,43 @@ struct FileRow: View {
 /// Linha do modo Minimalista: só o nome, sem fundo, com sombra para
 /// continuar legível sobre a tela levemente escurecida.
 struct MinimalFileRow: View {
+    @ObservedObject private var smart = SmartNameStore.shared
+
     let item: FileItem
     let isSelected: Bool
     var scale: CGFloat = 1
     var isHovered: Bool = false
 
     var body: some View {
-        Text(item.name)
-            .font(.system(size: 13 * scale, weight: isSelected ? .semibold : .regular))
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.85))
-            .shadow(color: .black.opacity(0.8), radius: 2, y: 1)
-            .padding(.vertical, 3 * scale)
-            .padding(.horizontal, 10 * scale)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                Capsule()
-                    .fill(
-                        isSelected
-                            ? Theme.tint(0.45)
-                            : (isHovered ? Color.white.opacity(0.09) : Color.clear)
-                    )
-            )
-            .contentShape(Rectangle())
-            .animation(.easeOut(duration: 0.12), value: isHovered)
+        HStack(spacing: 5 * scale) {
+            if smart.isPending(item) {
+                MagicNamePlaceholder(scale: scale * 0.85)
+            } else {
+                Text(smart.title(for: item))
+                    .font(.system(size: 13 * scale, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.85))
+                    .shadow(color: .black.opacity(0.8), radius: 2, y: 1)
+                if let tag = smart.tag(for: item) {
+                    TypeTag(text: tag, scale: scale, onDark: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3 * scale)
+        .padding(.horizontal, 10 * scale)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Capsule()
+                .fill(
+                    isSelected
+                        ? Theme.tint(0.45)
+                        : (isHovered ? Color.white.opacity(0.09) : Color.clear)
+                )
+        )
+        .contentShape(Rectangle())
+        .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 }
 

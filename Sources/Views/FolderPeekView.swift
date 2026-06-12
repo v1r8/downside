@@ -224,10 +224,13 @@ struct FolderPeekView: View {
             }
             if showHistory {
                 HistoryOverlay(scale: scale, searchQuery: searchText)
+                    .transition(.magicReveal)
             } else {
                 content
+                    .transition(.opacity)
             }
         }
+        .animation(.spring(response: 0.42, dampingFraction: 0.82), value: showHistory)
         .alert("Limpar a pasta?", isPresented: $confirmClean) {
             Button("Mover para o Lixo", role: .destructive) { startClean() }
             Button("Cancelar", role: .cancel) {}
@@ -269,60 +272,20 @@ struct FolderPeekView: View {
     private var header: some View {
         HStack(spacing: 9 * scale) {
 
-            // Livrinho do fichário: também é alvo de drop — arraste
-            // uma pilha para cá para arquivá-la. Durante arrastos
-            // ganha a cor de destaque e um anel tracejado (como o
-            // alvo de nova pilha).
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            // Bolha do fichário: vidro líquido suspenso, brilho
+            // irisado ao clicar. Também é alvo de drop — arraste uma
+            // pilha para cá para arquivá-la; durante arrastos a bolha
+            // cresce e ganha o anel tracejado.
+            FicharioBubble(
+                scale: scale,
+                isOpen: showHistory,
+                dropTargeted: historyDropTargeted,
+                dragActive: panel.isDraggingFromPanel || panel.externalDragActive
+            ) {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
                     showHistory.toggle()
                 }
-            } label: {
-                Image(systemName: showHistory ? "book.fill" : "book")
-                    .font(.system(size: 13 * scale))
-                    .foregroundStyle(
-                        historyDropTargeted || panel.isDraggingFromPanel || panel.externalDragActive
-                            ? Theme.accent
-                            : Color.primary
-                    )
-                    // Durante arrastos a zona se alarga em pílula;
-                    // sobre o alvo, alarga ainda mais.
-                    .frame(
-                        width: historyDropTargeted
-                            ? 58 * scale
-                            : (panel.isDraggingFromPanel || panel.externalDragActive ? 44 : 26) * scale,
-                        height: 26 * scale
-                    )
-                    .contentShape(Capsule())
             }
-            .background(
-                Capsule()
-                    .fill(Theme.tint(historyDropTargeted ? 0.15 : 0.06))
-                    .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(
-                        Theme.accent,
-                        style: StrokeStyle(lineWidth: 1, dash: [3, 3])
-                    )
-                    .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
-            )
-            // Ampliação com mola viva; RETORNO criticamente
-            // amortecido — desliza de volta sem nenhum quique, e o
-            // espaçamento dos vizinhos acompanha a mesma curva.
-            .animation(
-                historyDropTargeted
-                    ? .spring(response: 0.28, dampingFraction: 0.74)
-                    : .spring(response: 0.45, dampingFraction: 1.0),
-                value: historyDropTargeted
-            )
-            .animation(
-                (panel.isDraggingFromPanel || panel.externalDragActive)
-                    ? .spring(response: 0.32, dampingFraction: 0.78)
-                    : .spring(response: 0.5, dampingFraction: 1.0),
-                value: panel.isDraggingFromPanel || panel.externalDragActive
-            )
             .onDrop(of: [.fileURL], isTargeted: $historyDropTargeted) { providers in
                 StackDropHandler.collectFileURLs(providers) { urls in
                     archiveDropped(urls)
@@ -355,19 +318,21 @@ struct FolderPeekView: View {
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
-            if showDragHandle {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 11 * scale))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18 * scale, height: 18 * scale)
-                    .contentShape(Rectangle())
-                    .overlay(WindowDragHandle { panel.panelDragEnded() })
-                    .help("Arraste para reposicionar — o painel encaixa na grade da tela e memoriza")
-            }
+            // Cluster do canto direito: todos os ícones na MESMA caixa
+            // (26×26) com o MESMO respiro entre eles.
+            HStack(spacing: 3 * scale) {
+                if showDragHandle {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 11 * scale))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 26 * scale, height: 26 * scale)
+                        .contentShape(Rectangle())
+                        .overlay(WindowDragHandle { panel.panelDragEnded() })
+                        .help("Arraste para reposicionar — o painel encaixa na grade da tela e memoriza")
+                }
 
-            Group {
                 // Toggle de itens do clipboard: folha dobrada vazada;
-                // ativa = preenchida com contorno na cor de destaque.
+                // ativa = preenchida.
                 Button {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
                         clipboardTimeline.toggle()
@@ -375,9 +340,8 @@ struct FolderPeekView: View {
                 } label: {
                     Image(systemName: clipboardTimeline ? "doc.fill" : "doc")
                         .foregroundStyle(Color.primary)
-                        .font(.system(size: 13 * scale))
-                    .frame(width: 26 * scale, height: 26 * scale)
-                    .contentShape(Rectangle())
+                        .frame(width: 26 * scale, height: 26 * scale)
+                        .contentShape(Rectangle())
                 }
                 .scaleEffect(clipboardTimeline ? 1.06 : 1)
                 .animation(.spring(response: 0.28, dampingFraction: 0.7), value: clipboardTimeline)
@@ -387,7 +351,7 @@ struct FolderPeekView: View {
                     panel.isPinned.toggle()
                 } label: {
                     Image(systemName: panel.isPinned ? "pin.fill" : "pin")
-                        .frame(width: 24 * scale, height: 24 * scale)
+                        .frame(width: 26 * scale, height: 26 * scale)
                         .contentShape(Rectangle())
                 }
                 .help(panel.isPinned ? "Liberar painel" : "Manter painel aberto")
@@ -397,7 +361,7 @@ struct FolderPeekView: View {
                     openSettings()
                 } label: {
                     Image(systemName: "gearshape")
-                        .frame(width: 24 * scale, height: 24 * scale)
+                        .frame(width: 26 * scale, height: 26 * scale)
                         .contentShape(Rectangle())
                 }
                 .help("Configurações")
@@ -602,6 +566,9 @@ struct FolderPeekView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
+            // Nomeação inteligente: só itens que ficaram visíveis
+            // entram na fila (a LLM local nomeia um por vez).
+            .task(id: item.url) { SmartNameStore.shared.ensureName(item) }
             .modifier(ClipboardMark(
                 active: isClipboardItem(item),
                 style: clipboardStyle,
@@ -808,6 +775,19 @@ struct FolderPeekView: View {
         })
         menu.addItem(.separator())
         menu.addItem(ActionMenuItem(title: "Copiar\(suffix)") { copyToPasteboard(urls) })
+        if Prefs.smartNamesEnabled, urls.count == 1, let url = urls.first {
+            menu.addItem(.separator())
+            menu.addItem(ActionMenuItem(title: "Nomear com IA") {
+                Task { @MainActor in
+                    SmartNameStore.shared.requestName(FileItem(url: url), force: true)
+                }
+            })
+            if SmartNameStore.shared.hasName(url) {
+                menu.addItem(ActionMenuItem(title: "Usar nome original") {
+                    Task { @MainActor in SmartNameStore.shared.clearName(url) }
+                })
+            }
+        }
         menu.addItem(.separator())
         menu.addItem(ActionMenuItem(title: "Mover para o Lixo\(suffix)") { moveToTrash(urls) })
         return menu
@@ -1104,5 +1084,167 @@ extension View {
         } else {
             self
         }
+    }
+}
+
+/// Bolha do fichário: círculo de vidro líquido suspenso (sombra
+/// flutuante), com brilho irisado que se expande ao clicar. Durante
+/// arrastos cresce e vira alvo de drop com anel tracejado.
+private struct FicharioBubble: View {
+    @ObservedObject private var themeStore = ThemeStore.shared
+
+    let scale: CGFloat
+    let isOpen: Bool
+    let dropTargeted: Bool
+    let dragActive: Bool
+    var action: () -> Void
+
+    @State private var bursting = false
+    @State private var burst: CGFloat = 0
+
+    private var diameter: CGFloat {
+        (dropTargeted ? 40 : (dragActive ? 34 : 28)) * scale
+    }
+
+    var body: some View {
+        Button {
+            playBurst()
+            action()
+        } label: {
+            Image(systemName: isOpen ? "book.fill" : "book")
+                .font(.system(size: 12.5 * scale))
+                .foregroundStyle(
+                    dropTargeted || dragActive ? Theme.accent : Color.primary
+                )
+                .frame(width: diameter, height: diameter)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.borderless)
+        .background(glass)
+        .background(
+            Circle().fill(Theme.tint(dropTargeted ? 0.18 : (dragActive ? 0.08 : 0)))
+        )
+        .overlay(
+            Circle()
+                .strokeBorder(
+                    Theme.accent,
+                    style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                )
+                .opacity(dragActive || dropTargeted ? 1 : 0)
+        )
+        // Brilho do clique: anel irisado que escapa da bolha e some,
+        // com um lampejo de sparkles no ombro.
+        .overlay(
+            Circle()
+                .strokeBorder(
+                    AngularGradient(
+                        colors: [.cyan, .purple, .white, Theme.accent, .cyan],
+                        center: .center
+                    ),
+                    lineWidth: 1.5
+                )
+                .scaleEffect(0.7 + burst * 1.2)
+                .opacity(bursting ? Double(1 - burst) : 0)
+                .allowsHitTesting(false)
+        )
+        .overlay(alignment: .topTrailing) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 8 * scale, weight: .semibold))
+                .foregroundStyle(.white)
+                .shadow(color: Theme.accent.opacity(0.8), radius: 2)
+                .offset(x: 3 * scale, y: -3 * scale)
+                .opacity(bursting ? Double(1 - burst) : 0)
+                .scaleEffect(0.6 + burst * 0.8)
+                .allowsHitTesting(false)
+        }
+        .scaleEffect(bursting ? 1.08 : 1)
+        // Crescimento com mola viva; retorno criticamente amortecido —
+        // os vizinhos refluem na mesma curva.
+        .animation(
+            dropTargeted
+                ? .spring(response: 0.28, dampingFraction: 0.74)
+                : .spring(response: 0.45, dampingFraction: 1.0),
+            value: dropTargeted
+        )
+        .animation(
+            dragActive
+                ? .spring(response: 0.32, dampingFraction: 0.78)
+                : .spring(response: 0.5, dampingFraction: 1.0),
+            value: dragActive
+        )
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: bursting)
+    }
+
+    private func playBurst() {
+        burst = 0
+        bursting = true
+        withAnimation(.easeOut(duration: 0.55)) { burst = 1 }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            bursting = false
+            burst = 0
+        }
+    }
+
+    @ViewBuilder
+    private var glass: some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            Color.clear.glassEffect(.regular, in: Circle())
+        } else {
+            legacyGlass
+        }
+        #else
+        legacyGlass
+        #endif
+    }
+
+    private var legacyGlass: some View {
+        Circle()
+            .fill(.ultraThinMaterial)
+            .overlay(
+                Circle()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.4), Color.white.opacity(0.05)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: .black.opacity(0.22), radius: 5, y: 2)
+    }
+}
+
+/// Abertura "mágica" do fichário: o conteúdo emerge desembaçando,
+/// crescendo a partir da bolha (canto superior esquerdo) e descendo
+/// suave — tudo numa curva só.
+struct MagicRevealModifier: ViewModifier, Animatable {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(Double(progress))
+            .scaleEffect(0.9 + 0.1 * progress, anchor: .topLeading)
+            .blur(radius: (1 - progress) * 7)
+            .offset(y: (1 - progress) * -12)
+    }
+}
+
+extension AnyTransition {
+    static var magicReveal: AnyTransition {
+        .asymmetric(
+            insertion: .modifier(
+                active: MagicRevealModifier(progress: 0),
+                identity: MagicRevealModifier(progress: 1)
+            ),
+            removal: .opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading))
+        )
     }
 }

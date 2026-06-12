@@ -44,18 +44,19 @@ enum ClaudeService {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Título curto e informativo para uma pilha. Ordem de preferência:
+    /// Título curto e informativo para uma pilha. O prompt (com
+    /// conteúdo analisado) é montado UMA vez e tentado em ordem:
     /// Apple Intelligence (macOS 26) → Ollama local → Claude → data.
     static func stackTitle(for urls: [URL]) async -> String {
-        if let local = await LocalNamer.title(for: urls) {
+        let prompt = await TitlePrompt.build(for: urls)
+        if let local = await LocalNamer.complete(prompt: prompt) {
             return local
         }
-        if let ollama = await OllamaService.stackTitle(for: urls) {
+        if let ollama = await OllamaService.completeShort(prompt: prompt) {
             return ollama
         }
         let fallback = "Pilha de \(Date().formatted(date: .abbreviated, time: .shortened))"
         guard hasKey else { return fallback }
-        let prompt = await TitlePrompt.build(for: urls)
         let title = (try? await complete(
             prompt: prompt,
             model: "claude-haiku-4-5-20251001",
