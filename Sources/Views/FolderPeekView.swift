@@ -268,19 +268,25 @@ struct FolderPeekView: View {
 
     private var header: some View {
         HStack(spacing: 9 * scale) {
-            // Toggle de itens do clipboard: folha dobrada, comportamento
-            // gêmeo do livrinho do fichário.
+            // Toggle de itens do clipboard: folha dobrada vazada;
+            // ativa = preenchida com contorno na cor de destaque.
             Button {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
                     clipboardTimeline.toggle()
                 }
             } label: {
-                Image(systemName: clipboardTimeline ? "doc.fill" : "doc")
-                    .foregroundStyle(clipboardTimeline ? Theme.accent : Color.primary)
-                    .frame(width: 24 * scale, height: 24 * scale)
-                    .contentShape(Rectangle())
+                ZStack {
+                    Image(systemName: "doc.fill")
+                        .opacity(clipboardTimeline ? 1 : 0)
+                        .foregroundStyle(Color.primary.opacity(0.85))
+                    Image(systemName: "doc")
+                        .foregroundStyle(clipboardTimeline ? Theme.accent : Color.primary)
+                }
+                .font(.system(size: 13 * scale))
+                .frame(width: 26 * scale, height: 26 * scale)
+                .contentShape(Rectangle())
             }
-            .scaleEffect(clipboardTimeline ? 1.08 : 1)
+            .scaleEffect(clipboardTimeline ? 1.06 : 1)
             .animation(.spring(response: 0.28, dampingFraction: 0.7), value: clipboardTimeline)
             .help(clipboardTimeline ? "Ocultar itens do clipboard" : "Mostrar itens do clipboard")
 
@@ -334,10 +340,12 @@ struct FolderPeekView: View {
                                 ? Theme.accent
                                 : Color.primary
                         )
-                        // Durante arrastos a zona de soltar se alarga,
-                        // virando uma pílula — alvo bem maior.
+                        // Durante arrastos a zona se alarga em pílula;
+                        // sobre o alvo, alarga ainda mais.
                         .frame(
-                            width: (panel.isDraggingFromPanel || panel.externalDragActive ? 48 : 26) * scale,
+                            width: historyDropTargeted
+                                ? 64 * scale
+                                : (panel.isDraggingFromPanel || panel.externalDragActive ? 48 : 26) * scale,
                             height: 26 * scale
                         )
                         .contentShape(Capsule())
@@ -355,13 +363,18 @@ struct FolderPeekView: View {
                         )
                         .opacity(panel.isDraggingFromPanel || panel.externalDragActive || historyDropTargeted ? 1 : 0)
                 )
-                .scaleEffect(historyDropTargeted ? 1.12 : 1)
+                // Ampliação com mola viva; RETORNO mais amaciado (sem
+                // quicar de volta).
                 .animation(
-                    .spring(response: 0.28, dampingFraction: 0.72),
+                    historyDropTargeted
+                        ? .spring(response: 0.26, dampingFraction: 0.7)
+                        : .spring(response: 0.38, dampingFraction: 0.92),
                     value: historyDropTargeted
                 )
                 .animation(
-                    .spring(response: 0.28, dampingFraction: 0.72),
+                    (panel.isDraggingFromPanel || panel.externalDragActive)
+                        ? .spring(response: 0.3, dampingFraction: 0.74)
+                        : .spring(response: 0.4, dampingFraction: 0.94),
                     value: panel.isDraggingFromPanel || panel.externalDragActive
                 )
                 .onDrop(of: [.fileURL], isTargeted: $historyDropTargeted) { providers in

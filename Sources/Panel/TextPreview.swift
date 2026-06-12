@@ -54,6 +54,9 @@ struct PlainTextEditor: NSViewRepresentable {
     @Binding var text: String
     let fontSize: CGFloat
     let controller: TextEditorController
+    /// Recuo invisível no topo da área editável (o texto começa abaixo
+    /// da toolbar suspensa, mas rola por baixo dela).
+    var topInset: CGFloat = 0
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -65,6 +68,8 @@ struct PlainTextEditor: NSViewRepresentable {
         textView.backgroundColor = .clear
         textView.textContainerInset = NSSize(width: 6, height: 8)
         scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsets(top: topInset, left: 0, bottom: 0, right: 0)
         textView.string = text
         controller.textView = textView
         return scroll
@@ -119,7 +124,8 @@ struct TextFilePreview: View {
             PlainTextEditor(
                 text: $text,
                 fontSize: CGFloat(fontSize) * scale,
-                controller: controller
+                controller: controller,
+                topInset: 36 * scale
             )
             .frame(height: 280 * scale * sizeFactor)
             .background(

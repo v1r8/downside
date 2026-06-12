@@ -288,6 +288,13 @@ private struct StackChip: View {
 
     var body: some View {
         HStack(spacing: 6 * scale) {
+            // Indicador de bulk action, estilo "estrela à esquerda".
+            if stack.hadBulkAction, Prefs.bulkBadgeStyle == 2 {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10 * scale, weight: .semibold))
+                    .foregroundStyle(Theme.output)
+            }
+
             if stack.urls.isEmpty || isActive {
                 // Deck "vazio" enquanto as cartas estão na lista.
                 Image(systemName: "tray")
@@ -313,6 +320,21 @@ private struct StackChip: View {
                                 isSource: true
                             )
                     }
+
+                    // Indicador "carta no fim do deck": uma cartinha na
+                    // cor dos outputs fecha o leque.
+                    if stack.hadBulkAction, Prefs.bulkBadgeStyle == 1 {
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(Theme.outputTint(0.9))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.4), lineWidth: 0.8)
+                            )
+                            .frame(width: 9 * scale, height: 13 * scale)
+                            .rotationEffect(.degrees(9))
+                            .padding(.leading, 21 * scale)
+                            .zIndex(10)
+                    }
                 }
                 .frame(width: 36 * scale, alignment: .leading)
             }
@@ -323,6 +345,15 @@ private struct StackChip: View {
                 .padding(.horizontal, 6 * scale)
                 .padding(.vertical, 2 * scale)
                 .background(GlassCapsule(tint: 0.7))
+                .overlay(alignment: .topTrailing) {
+                    // Indicador "ponto no contador".
+                    if stack.hadBulkAction, Prefs.bulkBadgeStyle == 3 {
+                        Circle()
+                            .fill(Theme.output)
+                            .frame(width: 5 * scale, height: 5 * scale)
+                            .offset(x: 2 * scale, y: -2 * scale)
+                    }
+                }
 
             Image(systemName: isActive ? "chevron.up" : "chevron.down")
                 .font(.system(size: 8 * scale, weight: .semibold))

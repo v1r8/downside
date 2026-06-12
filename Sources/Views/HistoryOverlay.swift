@@ -19,6 +19,38 @@ struct HistoryOverlay: View {
     @State private var renameText = ""
     @StateObject private var runner = BulkActionRunner()
     @ObservedObject private var actionConfig = BulkActionConfigStore.shared
+    @AppStorage(PrefKey.historyLayout) private var layoutRaw = 1
+
+    /// Organizações do fichário: lista + 5 alternativas.
+    enum HistoryLayout: Int, CaseIterable {
+        case list = 1, grid, compact, timeline, mosaic, shelves
+
+        var icon: String {
+            switch self {
+            case .list: return "list.bullet"
+            case .grid: return "square.grid.2x2"
+            case .compact: return "rectangle.compress.vertical"
+            case .timeline: return "calendar.day.timeline.left"
+            case .mosaic: return "circle.grid.3x3"
+            case .shelves: return "books.vertical"
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .list: return "Lista"
+            case .grid: return "Grade"
+            case .compact: return "Compacta"
+            case .timeline: return "Linha do tempo"
+            case .mosaic: return "Mosaico"
+            case .shelves: return "Estantes"
+            }
+        }
+    }
+
+    private var layout: HistoryLayout {
+        HistoryLayout(rawValue: layoutRaw) ?? .list
+    }
 
     private var filtered: [ArchivedStack] {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespaces)
@@ -33,25 +65,37 @@ struct HistoryOverlay: View {
 
     var body: some View {
         VStack(spacing: 6 * scale) {
-            if !selection.isEmpty {
-                HStack {
+            HStack {
+                Picker("Organização", selection: $layoutRaw) {
+                    ForEach(HistoryLayout.allCases, id: \.rawValue) { option in
+                        Image(systemName: option.icon)
+                            .help(option.label)
+                            .tag(option.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+
+                Spacer()
+
+                if !selection.isEmpty {
                     Text("\(selection.count) selecionadas")
                         .font(.system(size: 10.5 * scale))
                         .foregroundStyle(.secondary)
-                    Spacer()
                     Button("Apagar", role: .destructive) {
                         for id in selection { store.delete(id) }
                         selection.removeAll()
                     }
                     .font(.system(size: 10.5 * scale))
-                    Button("Limpar seleção") {
+                    Button("Limpar") {
                         selection.removeAll()
                     }
                     .font(.system(size: 10.5 * scale))
                 }
-                .buttonStyle(.borderless)
-                .padding(.horizontal, 4 * scale)
             }
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 2 * scale)
 
             if filtered.isEmpty {
                 VStack(spacing: 6 * scale) {
@@ -67,10 +111,68 @@ struct HistoryOverlay: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                // Nos modos de mosaico/grade/estantes, a ficha aberta
+                // vira um cartão fixado no topo.
+                if usesPinnedDetail, let id = expandedEntry,
+                   let entry = filtered.first(where: { $0.id == id }) {
+                    detailCard(entry)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
                 ScrollView {
-                    LazyVStack(spacing: 4 * scale) {
-                        ForEach(filtered) { entry in
-                            card(entry)
+                    switch layout {
+                    case .list:
+                        LazyVStack(spacing: 4 * scale) {
+                            ForEach(filtered) { entry in
+                                card(entry)
+                            }
+                        }
+                    case .compact:
+                        LazyVStack(spacing: 2) {
+                            ForEach(filtered) { entry in
+                                compactRow(entry)
+                            }
+                        }
+                    case .grid:
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 140 * scale, maximum: 190 * scale), spacing: 6 * scale)],
+                            spacing: 6 * scale
+                        ) {
+                            ForEach(filtered) { entry in
+                                gridTile(entry)
+                            }
+                        }
+                    case .mosaic:
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 64 * scale, maximum: 84 * scale), spacing: 6 * scale)],
+                            spacing: 6 * scale
+                        ) {
+                            ForEach(filtered) { entry in
+                                mosaicTile(entry)
+                            }
+                        }
+                    case .timeline:
+                        LazyVStack(spacing: 4 * scale) {
+                            ForEach(timelineGroups, id: \.0) { group in
+                                sectionHeader(group.0)
+                                ForEach(group.1) { entry in
+                                    card(entry)
+                                }
+                            }
+                        }
+                    case .shelves:
+                        LazyVStack(alignment: .leading, spacing: 8 * scale) {
+                            ForEach(shelfGroups, id: \.0) { group in
+                                sectionHeader(group.0)
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 6 * scale) {
+                                        ForEach(group.1) { entry in
+                                            gridTile(entry)
+                                                .frame(width: 150 * scale)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -79,6 +181,54 @@ struct HistoryOverlay: View {
         .padding(10 * scale)
         .animation(.spring(response: 0.3, dampingFraction: 0.82), value: expandedEntry)
         .animation(.spring(response: 0.3, dampingFraction: 0.82), value: selection)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: layoutRaw)
+    }
+
+    private var usesPinnedDetail: Bool {
+        layout == .grid || layout == .mosaic || layout == .shelves
+    }
+
+    /// Agrupamentos da linha do tempo.
+    private var timelineGroups: [(String, [ArchivedStack])] {
+        let calendar = Calendar.current
+        let now = Date()
+        func bucket(_ date: Date) -> String {
+            if calendar.isDateInToday(date) { return "Hoje" }
+            if calendar.isDateInYesterday(date) { return "Ontem" }
+            if let week = calendar.dateInterval(of: .weekOfYear, for: now),
+               week.contains(date) { return "Esta semana" }
+            if let month = calendar.dateInterval(of: .month, for: now),
+               month.contains(date) { return "Este mês" }
+            return "Anteriores"
+        }
+        let order = ["Hoje", "Ontem", "Esta semana", "Este mês", "Anteriores"]
+        let grouped = Dictionary(grouping: filtered) { bucket($0.date) }
+        return order.compactMap { key in
+            grouped[key].map { (key, $0) }
+        }
+    }
+
+    /// Estantes por mês.
+    private var shelfGroups: [(String, [ArchivedStack])] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "LLLL 'de' yyyy"
+        formatter.locale = Locale(identifier: "pt_BR")
+        var seen: [String] = []
+        var grouped: [String: [ArchivedStack]] = [:]
+        for entry in filtered {
+            let key = formatter.string(from: entry.date).capitalized
+            if grouped[key] == nil { seen.append(key) }
+            grouped[key, default: []].append(entry)
+        }
+        return seen.map { ($0, grouped[$0] ?? []) }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10 * scale, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4 * scale)
     }
 
     // MARK: - Ficha
@@ -99,7 +249,7 @@ struct HistoryOverlay: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(entry.hadBulkAction ? Theme.outputTint(0.08) : Color.primary.opacity(0.04))
+                .fill(Color.primary.opacity(0.04))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -110,26 +260,234 @@ struct HistoryOverlay: View {
         )
     }
 
+    // MARK: - Componentes compartilhados
+
+    /// Leque de ícones da ficha, com o indicador de bulk action
+    /// "carta no fim do deck" quando configurado.
+    private func fan(_ entry: ArchivedStack, size: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            ForEach(Array(entry.urls.prefix(3).enumerated()), id: \.offset) { index, url in
+                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                    .resizable()
+                    .frame(width: size * scale, height: size * scale)
+                    .padding(.leading, CGFloat(index) * size * 0.25 * scale)
+                    .rotationEffect(.degrees(Double(index) * 3 - 3))
+            }
+            if entry.hadBulkAction, Prefs.bulkBadgeStyle == 1 {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(Theme.outputTint(0.9))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.4), lineWidth: 0.8)
+                    )
+                    .frame(width: size * 0.42 * scale, height: size * 0.62 * scale)
+                    .rotationEffect(.degrees(9))
+                    .padding(.leading, size * 0.95 * scale)
+                    .zIndex(10)
+            }
+        }
+        .frame(width: size * 1.7 * scale, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func bulkStar(_ entry: ArchivedStack) -> some View {
+        if entry.hadBulkAction, Prefs.bulkBadgeStyle == 2 {
+            Image(systemName: "sparkles")
+                .font(.system(size: 10 * scale, weight: .semibold))
+                .foregroundStyle(Theme.output)
+        }
+    }
+
+    @ViewBuilder
+    private func bulkDot(_ entry: ArchivedStack) -> some View {
+        if entry.hadBulkAction, Prefs.bulkBadgeStyle == 3 {
+            Circle()
+                .fill(Theme.output)
+                .frame(width: 5 * scale, height: 5 * scale)
+        }
+    }
+
+    /// Interação comum às variantes (clique expande, ⌘ seleciona,
+    /// duplo expande, arrasto restaura, menu, hover-preview).
+    private func tileInteraction(_ entry: ArchivedStack) -> ItemInteraction {
+        let isSelected = selection.contains(entry.id)
+        let isExpanded = expandedEntry == entry.id
+        return ItemInteraction(
+            onMouseDown: { _ in },
+            onClickUp: { modifiers in
+                if modifiers.contains(.command) {
+                    if isSelected { selection.remove(entry.id) } else { selection.insert(entry.id) }
+                } else {
+                    expandedEntry = isExpanded ? nil : entry.id
+                }
+            },
+            onDoubleClick: { expandedEntry = isExpanded ? nil : entry.id },
+            dragURLs: { entry.urls },
+            menu: { cardMenu(entry) },
+            onHover: { hovering, _ in
+                guard Prefs.archiveHoverPreview else { return }
+                if hovering {
+                    panel.hoverStackPreviewURLs(entry.id, urls: entry.urls)
+                } else {
+                    panel.preview.unhoverStack(entry.id)
+                }
+            },
+            onDragStarted: { panel.isDraggingFromPanel = true },
+            onDragEnded: { panel.isDraggingFromPanel = false }
+        )
+    }
+
+    // MARK: - Variantes de organização
+
+    private func compactRow(_ entry: ArchivedStack) -> some View {
+        let isSelected = selection.contains(entry.id)
+        let isExpanded = expandedEntry == entry.id
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6 * scale) {
+                bulkStar(entry)
+                Text(entry.title)
+                    .font(.system(size: 11 * scale, weight: .medium))
+                    .lineLimit(1)
+                bulkDot(entry)
+                Spacer()
+                Text("\(entry.paths.count)")
+                    .font(.system(size: 9.5 * scale))
+                    .foregroundStyle(.secondary)
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 7.5 * scale, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8 * scale)
+            .padding(.vertical, 4 * scale)
+            .contentShape(Rectangle())
+            .overlay(tileInteraction(entry))
+
+            if isExpanded {
+                Divider().opacity(0.3)
+                expandedContent(entry)
+                    .transition(.opacity)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(isSelected ? Theme.accent : Color.clear, lineWidth: 1)
+        )
+    }
+
+    private func gridTile(_ entry: ArchivedStack) -> some View {
+        let isSelected = selection.contains(entry.id)
+        return VStack(spacing: 5 * scale) {
+            HStack(spacing: 4 * scale) {
+                bulkStar(entry)
+                fan(entry, size: 26)
+            }
+            Text(entry.title)
+                .font(.system(size: 10.5 * scale, weight: .semibold))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 4 * scale) {
+                Text("\(entry.paths.count) docs")
+                bulkDot(entry)
+            }
+            .font(.system(size: 9 * scale))
+            .foregroundStyle(.secondary)
+        }
+        .padding(8 * scale)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(
+                    isSelected ? Theme.accent
+                        : (expandedEntry == entry.id ? Theme.tint(0.6) : Color.primary.opacity(0.07)),
+                    lineWidth: 1
+                )
+        )
+        .overlay(tileInteraction(entry))
+        .help(entry.title)
+    }
+
+    private func mosaicTile(_ entry: ArchivedStack) -> some View {
+        let isSelected = selection.contains(entry.id)
+        return VStack(spacing: 3 * scale) {
+            HStack(spacing: 3 * scale) {
+                bulkStar(entry)
+                fan(entry, size: 22)
+            }
+            HStack(spacing: 3 * scale) {
+                Text("\(entry.paths.count)")
+                    .font(.system(size: 9 * scale, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5 * scale)
+                    .padding(.vertical, 1.5 * scale)
+                    .background(GlassCapsule(tint: 0.7))
+                bulkDot(entry)
+            }
+        }
+        .padding(6 * scale)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(
+                    isSelected ? Theme.accent
+                        : (expandedEntry == entry.id ? Theme.tint(0.6) : Color.clear),
+                    lineWidth: 1
+                )
+        )
+        .overlay(tileInteraction(entry))
+        .help(entry.title)
+    }
+
+    /// Cartão de detalhe fixado no topo (grade/mosaico/estantes).
+    private func detailCard(_ entry: ArchivedStack) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6 * scale) {
+                bulkStar(entry)
+                Text(entry.title)
+                    .font(.system(size: 11.5 * scale, weight: .semibold))
+                    .lineLimit(1)
+                Spacer()
+                Button {
+                    expandedEntry = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12 * scale))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 8 * scale)
+            .padding(.vertical, 5 * scale)
+
+            Divider().opacity(0.3)
+            expandedContent(entry)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.tint(0.4), lineWidth: 1)
+        )
+    }
+
     private func header(_ entry: ArchivedStack, isSelected: Bool, isExpanded: Bool) -> some View {
         HStack(spacing: 8 * scale) {
             HStack(spacing: 8 * scale) {
-                // Estrela destacada à esquerda dos ícones: esta pilha
-                // tem outputs de ação em massa.
-                if entry.hadBulkAction {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 11 * scale, weight: .semibold))
-                        .foregroundStyle(Theme.output)
-                }
-                ZStack(alignment: .leading) {
-                    ForEach(Array(entry.urls.prefix(3).enumerated()), id: \.offset) { index, url in
-                        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                            .resizable()
-                            .frame(width: 20 * scale, height: 20 * scale)
-                            .padding(.leading, CGFloat(index) * 5 * scale)
-                            .rotationEffect(.degrees(Double(index) * 3 - 3))
-                    }
-                }
-                .frame(width: 34 * scale, alignment: .leading)
+                bulkStar(entry)
+                fan(entry, size: 20)
 
                 VStack(alignment: .leading, spacing: 1) {
                     if renamingEntry == entry.id {
@@ -145,9 +503,12 @@ struct HistoryOverlay: View {
                             .font(.system(size: 11.5 * scale, weight: .semibold))
                             .lineLimit(1)
                     }
-                    Text("\(entry.paths.count) docs · \(entry.date.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.system(size: 9.5 * scale))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4 * scale) {
+                        Text("\(entry.paths.count) docs · \(entry.date.formatted(date: .abbreviated, time: .shortened))")
+                        bulkDot(entry)
+                    }
+                    .font(.system(size: 9.5 * scale))
+                    .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 4)
             }

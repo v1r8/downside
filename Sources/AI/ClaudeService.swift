@@ -45,10 +45,13 @@ enum ClaudeService {
     }
 
     /// Título curto e informativo para uma pilha. Ordem de preferência:
-    /// modelo LOCAL (Apple Intelligence, macOS 26) → Claude → data.
+    /// Apple Intelligence (macOS 26) → Ollama local → Claude → data.
     static func stackTitle(for urls: [URL]) async -> String {
         if let local = await LocalNamer.title(for: urls) {
             return local
+        }
+        if let ollama = await OllamaService.stackTitle(for: urls) {
+            return ollama
         }
         let fallback = "Pilha de \(Date().formatted(date: .abbreviated, time: .shortened))"
         guard hasKey else { return fallback }

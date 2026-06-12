@@ -305,6 +305,8 @@ private struct StackSettingsTab: View {
     @AppStorage(PrefKey.stackPreviewEnabled) private var stackPreviewEnabled = true
     @AppStorage(PrefKey.stackPreviewDelay) private var stackPreviewDelay = 1.0
     @AppStorage(PrefKey.archiveHoverPreview) private var archiveHoverPreview = true
+    @AppStorage(PrefKey.historyLayout) private var historyLayout = 1
+    @AppStorage(PrefKey.bulkBadgeStyle) private var bulkBadgeStyle = 1
     @ObservedObject private var config = BulkActionConfigStore.shared
 
     private var archiveHoverBinding: Binding<Bool> {
@@ -330,6 +332,23 @@ private struct StackSettingsTab: View {
                         .foregroundStyle(.secondary)
                 }
                 Toggle("Também nas fichas do fichário", isOn: archiveHoverBinding)
+            }
+
+            Section("Fichário e indicadores") {
+                Picker("Organização do fichário", selection: $historyLayout) {
+                    Text("Lista").tag(1)
+                    Text("Grade").tag(2)
+                    Text("Compacta").tag(3)
+                    Text("Linha do tempo").tag(4)
+                    Text("Mosaico").tag(5)
+                    Text("Estantes por mês").tag(6)
+                }
+                Picker("Indicador de ações em massa", selection: $bulkBadgeStyle) {
+                    Text("Carta no fim do deck").tag(1)
+                    Text("Estrela à esquerda").tag(2)
+                    Text("Ponto no contador/título").tag(3)
+                    Text("Nenhum").tag(4)
+                }
             }
 
             Section("Ações em massa") {
@@ -464,6 +483,10 @@ private struct PreviewCategorySizeRow: View {
 private struct AISettingsTab: View {
     @AppStorage(PrefKey.claudeAPIKey) private var apiKey = ""
     @AppStorage(PrefKey.stackTitleDetail) private var titleDetail = 1
+    @AppStorage(PrefKey.ollamaModel) private var ollamaModel = "llama3.2:3b"
+
+    @State private var ollamaStatus = "Verificando…"
+    @State private var pullStatus: String?
 
     var body: some View {
         Form {
@@ -472,14 +495,47 @@ private struct AISettingsTab: View {
                     Text("Só os nomes dos arquivos").tag(1)
                     Text("Nomes + trechos do conteúdo").tag(2)
                 }
-                LabeledContent("Modelo local") {
+                LabeledContent("Apple Intelligence") {
                     Text(LocalNamer.isAvailable
-                        ? "Apple Intelligence disponível ✓ (no aparelho, grátis)"
-                        : "Indisponível — requer macOS 26 com Apple Intelligence; usa Claude/data como alternativa")
+                        ? "Disponível ✓ (no aparelho, grátis)"
+                        : "Indisponível (requer macOS 26 com Apple Intelligence)")
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
                 }
             }
+
+            Section("Modelo local baixável (Ollama)") {
+                LabeledContent("Status", value: ollamaStatus)
+                TextField("Modelo", text: $ollamaModel, prompt: Text("llama3.2:3b"))
+
+                HStack {
+                    Button("Instalar Ollama…") {
+                        NSWorkspace.shared.open(URL(string: "https://ollama.com/download")!)
+                    }
+                    Button(pullStatus == nil ? "Baixar modelo (~2 GB)" : "Baixando…") {
+                        startPull()
+                    }
+                    .disabled(pullStatus != nil)
+                    Button("Verificar") {
+                        Task { await refreshStatus() }
+                    }
+                }
+
+                if let pullStatus {
+                    Text(pullStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("""
+                Nomeação profunda, rápida e 100% local: instale o Ollama \
+                (app gratuito), baixe o modelo uma vez e os títulos das \
+                pilhas passam a ser gerados no seu Mac, sem internet e sem \
+                custo. Ordem de uso: Apple Intelligence → Ollama → Claude → data.
+                """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .task { await refreshStatus() }
 
             SecureField("Chave da API do Claude", text: $apiKey, prompt: Text("sk-ant-…"))
             Text("""
@@ -498,6 +554,36 @@ private struct AISettingsTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func refreshStatus() async {
+        guard await OllamaService.isRunning() else {
+            ollamaStatus = "Ollama não está rodando"
+            return
+        }
+        if await OllamaService.hasModel(ollamaModel) {
+            ollamaStatus = "Pronto ✓ — \(ollamaModel) baixado"
+        } else {
+            ollamaStatus = "Rodando — modelo \(ollamaModel) ainda não baixado"
+        }
+    }
+
+    private func startPull() {
+        pullStatus = "Iniciando…"
+        let model = ollamaModel
+        Task {
+            do {
+                try await OllamaService.pull(model: model) { status in
+                    Task { @MainActor in pullStatus = status }
+                }
+                pullStatus = nil
+                await refreshStatus()
+            } catch {
+                pullStatus = "Falhou — o Ollama está rodando?"
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                pullStatus = nil
+            }
+        }
     }
 }
 

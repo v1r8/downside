@@ -143,6 +143,9 @@ enum PrefKey {
     static let clipboardMarkIntensity = "clipboardMarkIntensity"
     static let clipboardBarWidth = "clipboardBarWidth"
     static let stackTitleDetail = "stackTitleDetail"
+    static let bulkBadgeStyle = "bulkBadgeStyle"
+    static let historyLayout = "historyLayout"
+    static let ollamaModel = "ollamaModel"
     static let panelWidth = "panelWidth"
     static let panelHeight = "panelHeight"
 }
@@ -296,6 +299,26 @@ enum Prefs {
     static var stackTitleDetail: Int {
         let value = UserDefaults.standard.integer(forKey: PrefKey.stackTitleDetail)
         return (1...2).contains(value) ? value : 1
+    }
+
+    /// Indicador de ações em massa: 1 = carta no fim do deck;
+    /// 2 = estrela à esquerda; 3 = ponto no contador/título; 4 = nenhum.
+    static var bulkBadgeStyle: Int {
+        let value = UserDefaults.standard.integer(forKey: PrefKey.bulkBadgeStyle)
+        return (1...4).contains(value) ? value : 1
+    }
+
+    /// Organização do fichário (HistoryLayout).
+    static var historyLayout: Int {
+        let value = UserDefaults.standard.integer(forKey: PrefKey.historyLayout)
+        return (1...6).contains(value) ? value : 1
+    }
+
+    /// Modelo do Ollama para nomeação local.
+    static var ollamaModel: String {
+        let value = UserDefaults.standard.string(forKey: PrefKey.ollamaModel)?
+            .trimmingCharacters(in: .whitespaces)
+        return (value?.isEmpty == false) ? value! : "llama3.2:3b"
     }
 
     /// Chave da API do Claude para os recursos de IA (opcional).
