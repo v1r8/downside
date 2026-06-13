@@ -11,6 +11,8 @@ import 'package:window_manager/window_manager.dart';
 
 import 'clipboard.dart';
 import 'downloads_view.dart';
+import 'drop_util.dart';
+import 'fichario.dart';
 import 'fichario_view.dart';
 import 'hot_corner.dart';
 import 'prefs.dart';
@@ -267,23 +269,11 @@ class _PanelScaffoldState extends State<PanelScaffold>
     } catch (_) {}
   }
 
-  /// Arrastar arquivos para o painel cria uma pilha provisória.
-  /// O DataReader do drop expõe getValue (callback), não readValue.
+  /// Arrastar arquivos para o painel (fora dos chips) cria uma pilha.
   Future<void> _onPerformDrop(PerformDropEvent event) async {
-    final paths = <String>[];
-    for (final item in event.session.items) {
-      final reader = item.dataReader;
-      if (reader == null || !reader.canProvide(Formats.fileUri)) continue;
-      final completer = Completer<Uri?>();
-      reader.getValue<Uri>(
-        Formats.fileUri,
-        (value) => completer.complete(value),
-        onError: (_) => completer.complete(null),
-      );
-      final uri = await completer.future;
-      if (uri != null) paths.add(uri.toFilePath(windows: true));
-    }
+    final paths = await readDroppedPaths(event);
     if (paths.isNotEmpty) StacksController.i.createWith(paths);
+    DragWatch.end();
   }
 
   Future<void> _openSettings() async {
@@ -349,7 +339,11 @@ class _PanelScaffoldState extends State<PanelScaffold>
             child: DropRegion(
               formats: const [Formats.fileUri],
               hitTestBehavior: HitTestBehavior.opaque,
-              onDropOver: (_) => DropOperation.copy,
+              onDropOver: (_) {
+                DragWatch.ping();
+                return DropOperation.copy;
+              },
+              onDropLeave: (_) => DragWatch.ping(),
               onPerformDrop: _onPerformDrop,
               child: Container(
                 decoration: BoxDecoration(
@@ -381,42 +375,81 @@ class _PanelScaffoldState extends State<PanelScaffold>
   }
 
   Widget _header(ColorScheme scheme) {
-    return Container(
+    return SizedBox(
       height: 50,
-      padding: const EdgeInsets.fromLTRB(12, 8, 10, 6),
-      child: Row(
+      child: Stack(
         children: [
-          DragToMoveArea(
-            child: Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Icon(Icons.download_rounded, size: 20, color: scheme.primary),
+          // Fundo arrastavel (mover a janela) atras dos controles.
+          Positioned.fill(
+            child: DragToMoveArea(child: const SizedBox.expand()),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+            child: Row(
+              children: [
+                _ficharioButton(scheme),
+                const SizedBox(width: 6),
+                Expanded(child: _searchField(scheme)),
+                const SizedBox(width: 6),
+                ValueListenableBuilder<String>(
+                  valueListenable: Prefs.i.viewMode,
+                  builder: (_, mode, __) => _iconButton(
+                    _viewIcon(mode),
+                    'Visualização: ${_viewLabel(mode)}',
+                    _cycleView,
+                  ),
+                ),
+                _iconButton(
+                  panel.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                  panel.pinned ? 'Liberar' : 'Fixar',
+                  () => setState(() => panel.pinned = !panel.pinned),
+                  active: panel.pinned,
+                ),
+                _iconButton(
+                    Icons.settings_outlined, 'Configurações', _openSettings),
+              ],
             ),
           ),
-          Expanded(child: _searchField(scheme)),
-          const SizedBox(width: 8),
-          _iconButton(
-            _showFichario ? Icons.menu_book : Icons.menu_book_outlined,
-            'Fichário',
-            () => setState(() => _showFichario = !_showFichario),
-            active: _showFichario,
-          ),
-          ValueListenableBuilder<String>(
-            valueListenable: Prefs.i.viewMode,
-            builder: (_, mode, __) => _iconButton(
-              _viewIcon(mode),
-              'Visualização: ${_viewLabel(mode)}',
-              _cycleView,
-            ),
-          ),
-          _iconButton(
-            panel.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-            panel.pinned ? 'Liberar' : 'Fixar',
-            () => setState(() => panel.pinned = !panel.pinned),
-            active: panel.pinned,
-          ),
-          _iconButton(Icons.settings_outlined, 'Configurações', _openSettings),
         ],
       ),
+    );
+  }
+
+  /// Livrinho do fichário: abre o histórico ao tocar; durante arrastos
+  /// é alvo para arquivar arquivos (drop) ou uma pilha inteira (chip).
+  Widget _ficharioButton(ColorScheme scheme) {
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (_) => true,
+      onAcceptWithDetails: (d) {
+        final list =
+            StacksController.i.stacks.value.where((s) => s.id == d.data).toList();
+        if (list.isNotEmpty) {
+          FicharioStore.i.archive(list.first);
+          StacksController.i.clearStack(d.data);
+        }
+      },
+      builder: (context, cand, rej) {
+        final hot = cand.isNotEmpty;
+        return DropRegion(
+          formats: const [Formats.fileUri],
+          hitTestBehavior: HitTestBehavior.opaque,
+          onDropOver: (_) {
+            DragWatch.ping();
+            return DropOperation.copy;
+          },
+          onPerformDrop: (event) async {
+            final paths = await readDroppedPaths(event);
+            if (paths.isNotEmpty) FicharioStore.i.archive(FileStack(0, paths));
+            DragWatch.end();
+          },
+          child: _iconButton(
+            _showFichario ? Icons.menu_book : Icons.menu_book_outlined,
+            'Fichário — solte uma pilha ou arquivos aqui para arquivar',
+            () => setState(() => _showFichario = !_showFichario),
+            active: _showFichario || hot,
+          ),
+        );
+      },
     );
   }
 
