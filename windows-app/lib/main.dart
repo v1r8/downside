@@ -71,16 +71,31 @@ class PanelController {
   bool settingsOpen = false;
   DateTime _shownAt = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// Geometria atual da janela (lógica) e escala — para o fechamento
+  /// por distância do mouse.
+  Rect? bounds;
+  double dpr = 1.0;
+
+  /// Distância (px lógicos) que o mouse pode se afastar do painel antes
+  /// de ele fechar sozinho (espelha o hideMargin do Mac).
+  static const double margin = 220;
+
   /// Incrementa a cada abertura — dispara a animação de entrada.
   final ValueNotifier<int> showTick = ValueNotifier<int>(0);
 
   Future<void> showAt(HotCorner corner) async {
+    // Já aberto: não reabre nem re-anima (evita "piscar/novas aberturas"
+    // ao mexer o mouse no canto repetidamente).
+    if (visible) return;
     await windowManager.setAlignment(_alignmentFor(corner));
     await windowManager.show();
     await windowManager.focus();
     visible = true;
     _shownAt = DateTime.now();
     showTick.value++;
+    try {
+      bounds = await windowManager.getBounds();
+    } catch (_) {}
   }
 
   Future<void> hide() async {
@@ -96,6 +111,21 @@ class PanelController {
       return;
     }
     hide();
+  }
+
+  /// Fecha quando o mouse se afasta além da margem (chamado pelo vigia).
+  void checkAutoHide() {
+    if (!visible || pinned || settingsOpen || bounds == null) return;
+    if (DateTime.now().difference(_shownAt) <
+        const Duration(milliseconds: 600)) {
+      return;
+    }
+    final c = globalCursorPhysical();
+    if (c == null) return;
+    final cursorLogical = Offset(c.dx / dpr, c.dy / dpr);
+    if (!bounds!.inflate(margin).contains(cursorLogical)) {
+      hide();
+    }
   }
 
   Alignment _alignmentFor(HotCorner c) {
@@ -154,6 +184,7 @@ class _PanelScaffoldState extends State<PanelScaffold>
     with TrayListener, WindowListener, SingleTickerProviderStateMixin {
   late final HotCornerService _hotCorner;
   late final AnimationController _anim;
+  Timer? _autoHide;
   final FocusNode _focusNode = FocusNode();
   final TextEditingController _searchCtrl = TextEditingController();
   String _query = '';
@@ -175,6 +206,11 @@ class _PanelScaffoldState extends State<PanelScaffold>
       enabledCorner: () => Prefs.i.corner.value,
     );
     _hotCorner.start();
+    // Vigia de fechamento por distância do mouse (como no Mac).
+    _autoHide = Timer.periodic(
+      const Duration(milliseconds: 200),
+      (_) => panel.checkAutoHide(),
+    );
   }
 
   void _onShow() {
@@ -187,6 +223,7 @@ class _PanelScaffoldState extends State<PanelScaffold>
   void dispose() {
     panel.showTick.removeListener(_onShow);
     _hotCorner.stop();
+    _autoHide?.cancel();
     _anim.dispose();
     trayManager.removeListener(this);
     windowManager.removeListener(this);
@@ -252,6 +289,7 @@ class _PanelScaffoldState extends State<PanelScaffold>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    panel.dpr = MediaQuery.devicePixelRatioOf(context);
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: FadeTransition(

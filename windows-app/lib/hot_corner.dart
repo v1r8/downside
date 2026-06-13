@@ -1,10 +1,22 @@
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:ui';
 
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
 
 enum HotCorner { topLeft, topRight, bottomLeft, bottomRight }
+
+/// Posição global do cursor em pixels físicos (ou null em falha).
+Offset? globalCursorPhysical() {
+  final p = calloc<POINT>();
+  try {
+    if (GetCursorPos(p) == 0) return null;
+    return Offset(p.ref.x.toDouble(), p.ref.y.toDouble());
+  } finally {
+    calloc.free(p);
+  }
+}
 
 /// Detecta o mouse parado num canto da tela, espelhando a abordagem do
 /// Mac: polling leve (~16x/s) da posição global do cursor via Win32
