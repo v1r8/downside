@@ -8,6 +8,7 @@ import 'package:flutter_acrylic/flutter_acrylic.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'clipboard.dart';
 import 'downloads_view.dart';
 import 'hot_corner.dart';
 import 'prefs.dart';
@@ -56,6 +57,10 @@ Future<void> main() async {
     } catch (_) {}
     await windowManager.hide();
   });
+
+  if (Prefs.i.clipboardEnabled.value) {
+    ClipboardMonitor.i.start();
+  }
 
   unawaited(_setupUpdater());
   runApp(const DownsideApp());

@@ -28,6 +28,9 @@ class Prefs {
   /// 'timeline' | 'grid' | 'list' — padrão linha do tempo (como no Mac).
   final viewMode = ValueNotifier<String>('timeline');
 
+  /// Incluir capturas do clipboard na linha do tempo.
+  final clipboardEnabled = ValueNotifier<bool>(false);
+
   Future<void> load() async {
     _sp = await SharedPreferences.getInstance();
     final f = _sp.getString('folder');
@@ -42,11 +45,17 @@ class Prefs {
     viewMode.value = (v == 'grid' || v == 'list' || v == 'timeline')
         ? v!
         : 'timeline';
+    clipboardEnabled.value = _sp.getBool('clipboardEnabled') ?? false;
   }
 
   void setViewMode(String value) {
     viewMode.value = value;
     _sp.setString('viewMode', value);
+  }
+
+  void setClipboardEnabled(bool value) {
+    clipboardEnabled.value = value;
+    _sp.setBool('clipboardEnabled', value);
   }
 
   void setFolder(String value) {

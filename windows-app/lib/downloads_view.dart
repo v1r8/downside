@@ -8,17 +8,20 @@ import 'package:super_drag_and_drop/super_drag_and_drop.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:watcher/watcher.dart';
 
+import 'clipboard.dart';
 import 'prefs.dart';
 import 'search.dart';
 import 'win_shell.dart';
 
 class _Entry {
-  _Entry(this.path, this.name, this.isDir, this.modified, this.size);
+  _Entry(this.path, this.name, this.isDir, this.modified, this.size,
+      {this.isClip = false});
   final String path;
   final String name;
   final bool isDir;
   final DateTime modified;
   final int size;
+  final bool isClip;
 }
 
 /// Conteudo da pasta monitorada (linha do tempo / grade / lista) com
@@ -47,12 +50,16 @@ class _DownloadsViewState extends State<DownloadsView> {
     _startWatching();
     Prefs.i.folder.addListener(_onFolderChanged);
     Prefs.i.viewMode.addListener(_onViewChanged);
+    Prefs.i.clipboardEnabled.addListener(_onViewChanged);
+    ClipboardMonitor.i.items.addListener(_onViewChanged);
   }
 
   @override
   void dispose() {
     Prefs.i.folder.removeListener(_onFolderChanged);
     Prefs.i.viewMode.removeListener(_onViewChanged);
+    Prefs.i.clipboardEnabled.removeListener(_onViewChanged);
+    ClipboardMonitor.i.items.removeListener(_onViewChanged);
     _watchSub?.cancel();
     _debounce?.cancel();
     super.dispose();
@@ -76,12 +83,33 @@ class _DownloadsViewState extends State<DownloadsView> {
     } catch (_) {}
   }
 
+  /// Pasta (+ itens do clipboard, se habilitado), mais recentes primeiro.
+  List<_Entry> get _all {
+    if (!Prefs.i.clipboardEnabled.value) return _entries;
+    final known = _entries.map((e) => e.path).toSet();
+    final clips = ClipboardMonitor.i.items.value
+        .where((c) => !known.contains(c.path))
+        .map((c) => _Entry(c.path, c.name, false, c.date, _sizeOf(c.path),
+            isClip: true));
+    return [..._entries, ...clips]
+      ..sort((a, b) => b.modified.compareTo(a.modified));
+  }
+
+  int _sizeOf(String path) {
+    try {
+      return File(path).statSync().size;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   List<_Entry> get _visible {
+    final base = _all;
     final raw = widget.query.trim();
-    if (raw.isEmpty) return _entries;
+    if (raw.isEmpty) return base;
     final q = NaturalSearch.parse(raw);
-    if (q.isEmpty) return _entries;
-    return _entries
+    if (q.isEmpty) return base;
+    return base
         .where((e) => NaturalSearch.matches(
               name: e.name,
               isDir: e.isDir,
@@ -256,7 +284,7 @@ class _DownloadsViewState extends State<DownloadsView> {
           scheme: scheme,
           child: Column(
             children: [
-              Icon(_iconFor(e), size: 40, color: _colorFor(e, scheme)),
+              _leading(e, 40, scheme),
               const SizedBox(height: 6),
               Expanded(
                 child: Text(e.name,
@@ -312,7 +340,7 @@ class _DownloadsViewState extends State<DownloadsView> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Row(
             children: [
-              Icon(_iconFor(e), size: 26, color: _colorFor(e, scheme)),
+              _leading(e, 26, scheme),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -404,6 +432,29 @@ class _DownloadsViewState extends State<DownloadsView> {
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     }
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  /// Icone do item, com um pequeno selo de clipboard quando aplicavel.
+  Widget _leading(_Entry e, double size, ColorScheme scheme) {
+    final icon = Icon(_iconFor(e), size: size, color: _colorFor(e, scheme));
+    if (!e.isClip) return icon;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        icon,
+        Positioned(
+          right: -2,
+          bottom: -2,
+          child: Container(
+            padding: const EdgeInsets.all(2),
+            decoration:
+                BoxDecoration(color: scheme.primary, shape: BoxShape.circle),
+            child: Icon(Icons.content_paste,
+                size: size * 0.34, color: scheme.onPrimary),
+          ),
+        ),
+      ],
+    );
   }
 
   IconData _iconFor(_Entry e) {

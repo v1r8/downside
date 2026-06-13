@@ -3,6 +3,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'clipboard.dart';
 import 'hot_corner.dart';
 import 'prefs.dart';
 
@@ -115,6 +116,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
               ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          _sectionTitle('Clipboard'),
+          ValueListenableBuilder<bool>(
+            valueListenable: Prefs.i.clipboardEnabled,
+            builder: (_, on, __) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('Incluir clipboard na linha do tempo'),
+              subtitle: const Text(
+                  'Textos e imagens copiados aparecem junto com os arquivos.'),
+              value: on,
+              onChanged: (v) {
+                Prefs.i.setClipboardEnabled(v);
+                if (v) {
+                  ClipboardMonitor.i.start();
+                } else {
+                  ClipboardMonitor.i.stop();
+                }
+              },
             ),
           ),
           const SizedBox(height: 16),
