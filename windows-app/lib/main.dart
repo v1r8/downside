@@ -32,6 +32,9 @@ Future<void> main() async {
     await windowManager.show();
     await windowManager.focus();
   });
+  // Fechar a janela esconde na bandeja (comportamento de app de bandeja),
+  // em vez de encerrar o app. Sair de verdade só pelo menu da bandeja.
+  await windowManager.setPreventClose(true);
 
   // Auto-update (WinSparkle). Defensivo: nunca pode derrubar o app se
   // o feed ainda não existir ou a verificação falhar.
@@ -122,6 +125,12 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
     } catch (_) {
       // Sem ícone: o app ainda abre a janela.
     }
+  }
+
+  @override
+  void onWindowClose() {
+    // Esconde em vez de encerrar (setPreventClose está ativo).
+    windowManager.hide();
   }
 
   @override

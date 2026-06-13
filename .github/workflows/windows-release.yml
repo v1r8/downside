@@ -76,7 +76,7 @@ jobs:
                 <title>$v</title>
                 <pubDate>$pub</pubDate>
                 <sparkle:os>windows</sparkle:os>
-                <sparkle:version>$run</sparkle:version>
+                <sparkle:version>$v+$run</sparkle:version>
                 <sparkle:shortVersionString>$v</sparkle:shortVersionString>
                 <enclosure url="$url" length="$len" type="application/octet-stream" />
               </item>
