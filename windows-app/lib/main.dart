@@ -5,6 +5,7 @@ import 'package:auto_updater/auto_updater.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart';
+import 'package:super_drag_and_drop/super_drag_and_drop.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -14,6 +15,8 @@ import 'hot_corner.dart';
 import 'prefs.dart';
 import 'settings_screen.dart';
 import 'single_instance.dart';
+import 'stacks.dart';
+import 'stacks_bar.dart';
 
 const String kFeedURL =
     'https://github.com/v1r8/downside/releases/download/windows/appcast-win.xml';
@@ -262,6 +265,20 @@ class _PanelScaffoldState extends State<PanelScaffold>
     } catch (_) {}
   }
 
+  /// Arrastar arquivos para o painel cria uma pilha provisória.
+  Future<void> _onPerformDrop(PerformDropEvent event) async {
+    final paths = <String>[];
+    for (final item in event.session.items) {
+      final reader = item.dataReader;
+      if (reader == null) continue;
+      try {
+        final uri = await reader.readValue(Formats.fileUri);
+        if (uri != null) paths.add(uri.toFilePath(windows: true));
+      } catch (_) {}
+    }
+    if (paths.isNotEmpty) StacksController.i.createWith(paths);
+  }
+
   Future<void> _openSettings() async {
     panel.settingsOpen = true;
     await Navigator.of(context).push(
@@ -322,20 +339,28 @@ class _PanelScaffoldState extends State<PanelScaffold>
               }
               return KeyEventResult.ignored;
             },
-            child: Container(
-              decoration: BoxDecoration(
-                color: scheme.surface.withValues(alpha: 0.55),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.08),
+            child: DropRegion(
+              formats: const [Formats.fileUri],
+              hitTestBehavior: HitTestBehavior.opaque,
+              onDropOver: (_) => DropOperation.copy,
+              onPerformDrop: _onPerformDrop,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: scheme.surface.withValues(alpha: 0.55),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
+                  ),
+                  borderRadius: BorderRadius.circular(18),
                 ),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Column(
-                children: [
-                  _header(scheme),
-                  Divider(height: 1, color: Colors.white.withValues(alpha: 0.06)),
-                  Expanded(child: DownloadsView(query: _query)),
-                ],
+                child: Column(
+                  children: [
+                    _header(scheme),
+                    Divider(
+                        height: 1, color: Colors.white.withValues(alpha: 0.06)),
+                    const StacksBar(),
+                    Expanded(child: DownloadsView(query: _query)),
+                  ],
+                ),
               ),
             ),
           ),
