@@ -64,7 +64,9 @@ Future<void> main() async {
 Future<void> _setupUpdater() async {
   try {
     await autoUpdater.setFeedURL(kFeedURL);
-    await autoUpdater.setScheduledCheckInterval(3600);
+    // Canal de teste: checa com frequencia para pegar builds novas
+    // quase na hora enquanto o app esta aberto.
+    await autoUpdater.setScheduledCheckInterval(120);
     await autoUpdater.checkForUpdates();
   } catch (_) {}
 }
