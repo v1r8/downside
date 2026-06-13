@@ -1,0 +1,96 @@
+name: Windows Release
+
+# Espelha o fluxo do Mac: mudar windows-app/VERSION dispara o build.
+# As releases do Windows usam tag fixa "windows" e make_latest=false,
+# para NUNCA virarem a "latest" do GitHub (o canal do Mac usa
+# /releases/latest e não pode ser afetado).
+on:
+  push:
+    branches: [claude/sweet-brahmagupta-aomptn, main]
+    paths: ['windows-app/VERSION']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: windows-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ler versão
+        id: ver
+        run: |
+          $v = (Get-Content VERSION -Raw).Trim()
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Gerar plataforma Windows
+        run: flutter create --platforms=windows --org com.v1r8 --project-name downside .
+
+      - name: Definir versão no pubspec
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $run = "${{ github.run_number }}"
+          (Get-Content pubspec.yaml) -replace '^version: .*', "version: $v+$run" | Set-Content pubspec.yaml
+
+      - name: Dependências
+        run: flutter pub get
+
+      - name: Build (release)
+        run: flutter build windows --release
+
+      - name: Instalar Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Montar instalador
+        run: |
+          $src = (Resolve-Path "build\windows\x64\runner\Release").Path
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DMyAppVersion=${{ steps.ver.outputs.version }}" `
+            "/DMySource=$src" `
+            "installer\inno.iss"
+
+      - name: Gerar appcast-win.xml
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $run = "${{ github.run_number }}"
+          $exe = "dist\DownsideSetup-$v.exe"
+          $len = (Get-Item $exe).Length
+          $url = "https://github.com/v1r8/downside/releases/download/windows/DownsideSetup-$v.exe"
+          $pub = (Get-Date).ToUniversalTime().ToString("ddd, dd MMM yyyy HH:mm:ss +0000", [System.Globalization.CultureInfo]::InvariantCulture)
+          $xml = @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>Downside (Windows)</title>
+              <item>
+                <title>$v</title>
+                <pubDate>$pub</pubDate>
+                <sparkle:os>windows</sparkle:os>
+                <sparkle:version>$run</sparkle:version>
+                <sparkle:shortVersionString>$v</sparkle:shortVersionString>
+                <enclosure url="$url" length="$len" type="application/octet-stream" />
+              </item>
+            </channel>
+          </rss>
+          "@
+          $xml.Trim() | Set-Content -Path "dist\appcast-win.xml" -Encoding utf8
+
+      - name: Publicar release (tag fixa "windows", nunca latest)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows
+          name: Downside para Windows
+          make_latest: false
+          files: |
+            windows-app/dist/DownsideSetup-${{ steps.ver.outputs.version }}.exe
+            windows-app/dist/appcast-win.xml

@@ -1,0 +1,23 @@
+name: downside
+description: "Downside para Windows — painel flutuante de Downloads, clipboard, pilhas e fichário."
+publish_to: 'none'
+version: 0.0.1+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  window_manager: ^0.4.2
+  tray_manager: ^0.3.2
+  auto_updater: ^0.2.1
+  package_info_plus: ^8.0.2
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
