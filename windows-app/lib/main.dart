@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'clipboard.dart';
 import 'downloads_view.dart';
+import 'fichario_view.dart';
 import 'hot_corner.dart';
 import 'prefs.dart';
 import 'settings_screen.dart';
@@ -203,6 +204,7 @@ class _PanelScaffoldState extends State<PanelScaffold>
   final FocusNode _focusNode = FocusNode();
   final TextEditingController _searchCtrl = TextEditingController();
   String _query = '';
+  bool _showFichario = false;
 
   @override
   void initState() {
@@ -266,15 +268,20 @@ class _PanelScaffoldState extends State<PanelScaffold>
   }
 
   /// Arrastar arquivos para o painel cria uma pilha provisória.
+  /// O DataReader do drop expõe getValue (callback), não readValue.
   Future<void> _onPerformDrop(PerformDropEvent event) async {
     final paths = <String>[];
     for (final item in event.session.items) {
       final reader = item.dataReader;
-      if (reader == null) continue;
-      try {
-        final uri = await reader.readValue(Formats.fileUri);
-        if (uri != null) paths.add(uri.toFilePath(windows: true));
-      } catch (_) {}
+      if (reader == null || !reader.canProvide(Formats.fileUri)) continue;
+      final completer = Completer<Uri?>();
+      reader.getValue<Uri>(
+        Formats.fileUri,
+        (value) => completer.complete(value),
+        onError: (_) => completer.complete(null),
+      );
+      final uri = await completer.future;
+      if (uri != null) paths.add(uri.toFilePath(windows: true));
     }
     if (paths.isNotEmpty) StacksController.i.createWith(paths);
   }
@@ -358,7 +365,11 @@ class _PanelScaffoldState extends State<PanelScaffold>
                     Divider(
                         height: 1, color: Colors.white.withValues(alpha: 0.06)),
                     const StacksBar(),
-                    Expanded(child: DownloadsView(query: _query)),
+                    Expanded(
+                      child: _showFichario
+                          ? const FicharioView()
+                          : DownloadsView(query: _query),
+                    ),
                   ],
                 ),
               ),
@@ -383,6 +394,12 @@ class _PanelScaffoldState extends State<PanelScaffold>
           ),
           Expanded(child: _searchField(scheme)),
           const SizedBox(width: 8),
+          _iconButton(
+            _showFichario ? Icons.menu_book : Icons.menu_book_outlined,
+            'Fichário',
+            () => setState(() => _showFichario = !_showFichario),
+            active: _showFichario,
+          ),
           ValueListenableBuilder<String>(
             valueListenable: Prefs.i.viewMode,
             builder: (_, mode, __) => _iconButton(

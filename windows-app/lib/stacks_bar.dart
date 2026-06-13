@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 
+import 'fichario.dart';
 import 'file_icons.dart';
 import 'stacks.dart';
 
@@ -162,6 +163,11 @@ class _StacksBarState extends State<StacksBar> {
                   for (final path in s.paths) {
                     launchUrl(Uri.file(path));
                   }
+                }, scheme),
+                const SizedBox(width: 8),
+                _action(Icons.archive_outlined, 'Arquivar', () {
+                  FicharioStore.i.archive(s);
+                  StacksController.i.clearStack(s.id);
                 }, scheme),
                 const SizedBox(width: 8),
                 _action(Icons.close, 'Limpar', () {
