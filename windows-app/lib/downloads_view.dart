@@ -2,11 +2,15 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:super_drag_and_drop/super_drag_and_drop.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:watcher/watcher.dart';
 
 import 'prefs.dart';
+import 'search.dart';
+import 'win_shell.dart';
 
 class _Entry {
   _Entry(this.path, this.name, this.isDir, this.modified, this.size);
@@ -17,9 +21,9 @@ class _Entry {
   final int size;
 }
 
-/// Conteúdo da pasta monitorada, em três modos: linha do tempo
-/// (padrão, agrupada por data), grade e lista. Abre no duplo-clique e
-/// acompanha mudanças da pasta.
+/// Conteudo da pasta monitorada (linha do tempo / grade / lista) com
+/// multiselecao estilo Finder, menu de contexto, arrastar para fora e
+/// busca em linguagem natural.
 class DownloadsView extends StatefulWidget {
   const DownloadsView({super.key, this.query = ''});
 
@@ -31,7 +35,8 @@ class DownloadsView extends StatefulWidget {
 
 class _DownloadsViewState extends State<DownloadsView> {
   List<_Entry> _entries = [];
-  String? _selected;
+  final Set<String> _selection = {};
+  int? _anchor;
   StreamSubscription<WatchEvent>? _watchSub;
   Timer? _debounce;
 
@@ -72,9 +77,19 @@ class _DownloadsViewState extends State<DownloadsView> {
   }
 
   List<_Entry> get _visible {
-    final q = widget.query.trim().toLowerCase();
+    final raw = widget.query.trim();
+    if (raw.isEmpty) return _entries;
+    final q = NaturalSearch.parse(raw);
     if (q.isEmpty) return _entries;
-    return _entries.where((e) => e.name.toLowerCase().contains(q)).toList();
+    return _entries
+        .where((e) => NaturalSearch.matches(
+              name: e.name,
+              isDir: e.isDir,
+              size: e.size,
+              date: e.modified,
+              query: q,
+            ))
+        .toList();
   }
 
   void _load() {
@@ -86,24 +101,115 @@ class _DownloadsViewState extends State<DownloadsView> {
         if (name.startsWith('.')) continue;
         try {
           final st = e.statSync();
-          list.add(_Entry(
-            e.path,
-            name,
-            st.type == FileSystemEntityType.directory,
-            st.modified,
-            st.size,
-          ));
+          list.add(_Entry(e.path, name,
+              st.type == FileSystemEntityType.directory, st.modified, st.size));
         } catch (_) {}
       }
     } catch (_) {}
     list.sort((a, b) => b.modified.compareTo(a.modified));
-    if (mounted) setState(() => _entries = list.take(300).toList());
+    if (mounted) {
+      setState(() {
+        _entries = list.take(300).toList();
+        _selection.removeWhere((path) => !_entries.any((e) => e.path == path));
+      });
+    }
   }
 
-  Future<void> _open(_Entry e) async {
-    try {
-      await launchUrl(Uri.file(e.path));
-    } catch (_) {}
+  // MARK: selecao (semantica do Finder)
+
+  void _tap(List<_Entry> items, int index) {
+    final e = items[index];
+    final ctrl = HardwareKeyboard.instance.isControlPressed;
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+    setState(() {
+      if (ctrl) {
+        if (!_selection.add(e.path)) _selection.remove(e.path);
+        _anchor = index;
+      } else if (shift && _anchor != null) {
+        final lo = _anchor! < index ? _anchor! : index;
+        final hi = _anchor! < index ? index : _anchor!;
+        for (var k = lo; k <= hi && k < items.length; k++) {
+          _selection.add(items[k].path);
+        }
+      } else {
+        _selection
+          ..clear()
+          ..add(e.path);
+        _anchor = index;
+      }
+    });
+  }
+
+  List<String> _targets(_Entry e) {
+    if (_selection.contains(e.path) && _selection.length > 1) {
+      return _selection.toList();
+    }
+    return [e.path];
+  }
+
+  Future<void> _open(List<String> paths) async {
+    for (final path in paths) {
+      try {
+        await launchUrl(Uri.file(path));
+      } catch (_) {}
+    }
+  }
+
+  void _contextMenu(List<_Entry> items, int index, Offset pos) {
+    final e = items[index];
+    if (!_selection.contains(e.path)) {
+      setState(() {
+        _selection
+          ..clear()
+          ..add(e.path);
+        _anchor = index;
+      });
+    }
+    final targets = _targets(e);
+    final suffix = targets.length > 1 ? ' (${targets.length})' : '';
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(pos.dx, pos.dy, pos.dx, pos.dy),
+      items: [
+        PopupMenuItem(value: 'open', child: Text('Abrir$suffix')),
+        PopupMenuItem(value: 'reveal', child: const Text('Mostrar no Explorer')),
+        PopupMenuItem(value: 'copy', child: Text('Copiar caminho$suffix')),
+        const PopupMenuDivider(),
+        PopupMenuItem(value: 'trash', child: Text('Mover para a Lixeira$suffix')),
+      ],
+    ).then((choice) {
+      switch (choice) {
+        case 'open':
+          _open(targets);
+          break;
+        case 'reveal':
+          WinShell.revealInExplorer(e.path);
+          break;
+        case 'copy':
+          Clipboard.setData(ClipboardData(text: targets.join('\n')));
+          break;
+        case 'trash':
+          if (WinShell.moveToRecycleBin(targets)) {
+            setState(() => _selection.clear());
+            _load();
+          }
+          break;
+      }
+    });
+  }
+
+  /// Envolve uma celula com arrastar-para-fora (arquivo real).
+  Widget _draggable(_Entry e, Widget child) {
+    return DragItemWidget(
+      allowedOperations: () => [DropOperation.copy],
+      canAddItemToExistingSession: true,
+      dragItemProvider: (request) async {
+        final item = DragItem();
+        item.add(Formats.fileUri(Uri.file(e.path)));
+        return item;
+      },
+      child: DraggableWidget(child: child),
+    );
   }
 
   @override
@@ -127,13 +233,11 @@ class _DownloadsViewState extends State<DownloadsView> {
       case 'grid':
         return _grid(items, scheme);
       case 'list':
-        return _list(items, scheme);
+        return _listView(items, scheme, grouped: false);
       default:
-        return _timeline(items, scheme);
+        return _listView(items, scheme, grouped: true);
     }
   }
-
-  // MARK: grade
 
   Widget _grid(List<_Entry> items, ColorScheme scheme) {
     return GridView.builder(
@@ -147,56 +251,40 @@ class _DownloadsViewState extends State<DownloadsView> {
       itemCount: items.length,
       itemBuilder: (context, i) {
         final e = items[i];
-        final selected = _selected == e.path;
-        return GestureDetector(
-          onTap: () => setState(() => _selected = e.path),
-          onDoubleTap: () => _open(e),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-            decoration: BoxDecoration(
-              color: selected
-                  ? scheme.primary.withValues(alpha: 0.22)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Column(
-              children: [
-                Icon(_iconFor(e), size: 40, color: _colorFor(e, scheme)),
-                const SizedBox(height: 6),
-                Expanded(
-                  child: Text(e.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 11)),
-                ),
-              ],
-            ),
+        final cell = _cellDecoration(
+          selected: _selection.contains(e.path),
+          scheme: scheme,
+          child: Column(
+            children: [
+              Icon(_iconFor(e), size: 40, color: _colorFor(e, scheme)),
+              const SizedBox(height: 6),
+              Expanded(
+                child: Text(e.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 11)),
+              ),
+            ],
           ),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         );
+        return _interactive(items, i, e, cell);
       },
     );
   }
 
-  // MARK: lista (plana) e linha do tempo (agrupada por data)
-
-  Widget _list(List<_Entry> items, ColorScheme scheme) {
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
-      itemCount: items.length,
-      itemBuilder: (context, i) => _row(items[i], scheme),
-    );
-  }
-
-  Widget _timeline(List<_Entry> items, ColorScheme scheme) {
-    // Lista achatada: cabeçalhos (String) + itens (_Entry), na ordem.
+  Widget _listView(List<_Entry> items, ColorScheme scheme,
+      {required bool grouped}) {
     final rows = <Object>[];
     String? current;
     for (final e in items) {
-      final b = _bucket(e.modified);
-      if (b != current) {
-        current = b;
-        rows.add(b);
+      if (grouped) {
+        final b = _bucket(e.modified);
+        if (b != current) {
+          current = b;
+          rows.add(b);
+        }
       }
       rows.add(e);
     }
@@ -207,7 +295,8 @@ class _DownloadsViewState extends State<DownloadsView> {
         final r = rows[i];
         if (r is String) {
           return Padding(
-            padding: EdgeInsets.only(left: 8, right: 8, top: i == 0 ? 6 : 16, bottom: 6),
+            padding: EdgeInsets.only(
+                left: 8, right: 8, top: i == 0 ? 6 : 16, bottom: 6),
             child: Text(r,
                 style: TextStyle(
                     fontSize: 12.5,
@@ -215,45 +304,64 @@ class _DownloadsViewState extends State<DownloadsView> {
                     color: scheme.onSurfaceVariant)),
           );
         }
-        return _row(r as _Entry, scheme);
+        final e = r as _Entry;
+        final index = items.indexOf(e);
+        final row = _cellDecoration(
+          selected: _selection.contains(e.path),
+          scheme: scheme,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            children: [
+              Icon(_iconFor(e), size: 26, color: _colorFor(e, scheme)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(e.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12.5)),
+                    Text(_meta(e),
+                        style: TextStyle(
+                            fontSize: 10.5, color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+        return _interactive(items, index, e, row);
       },
     );
   }
 
-  Widget _row(_Entry e, ColorScheme scheme) {
-    final selected = _selected == e.path;
-    return GestureDetector(
-      onTap: () => setState(() => _selected = e.path),
-      onDoubleTap: () => _open(e),
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 1),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected
-              ? scheme.primary.withValues(alpha: 0.22)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Icon(_iconFor(e), size: 26, color: _colorFor(e, scheme)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(e.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12.5)),
-                  Text(_meta(e),
-                      style: TextStyle(
-                          fontSize: 10.5, color: scheme.onSurfaceVariant)),
-                ],
-              ),
-            ),
-          ],
-        ),
+  Widget _cellDecoration({
+    required bool selected,
+    required ColorScheme scheme,
+    required Widget child,
+    required EdgeInsets padding,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 1),
+      padding: padding,
+      decoration: BoxDecoration(
+        color:
+            selected ? scheme.primary.withValues(alpha: 0.22) : Colors.transparent,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _interactive(List<_Entry> items, int index, _Entry e, Widget child) {
+    return _draggable(
+      e,
+      GestureDetector(
+        onTap: () => _tap(items, index),
+        onDoubleTap: () => _open(_targets(e)),
+        onSecondaryTapDown: (d) => _contextMenu(items, index, d.globalPosition),
+        child: child,
       ),
     );
   }
@@ -268,13 +376,13 @@ class _DownloadsViewState extends State<DownloadsView> {
     if (diff <= 0) return 'Hoje';
     if (diff == 1) return 'Ontem';
     if (diff < 7) return 'Esta semana';
-    if (d.year == now.year && d.month == now.month) return 'Este mês';
+    if (d.year == now.year && d.month == now.month) return 'Este mes';
     return 'Anteriores';
   }
 
   String _meta(_Entry e) {
     final size = e.isDir ? 'Pasta' : _humanSize(e.size);
-    return '$size · ${_relative(e.modified)}';
+    return '$size - ${_relative(e.modified)}';
   }
 
   String _relative(DateTime d) {
