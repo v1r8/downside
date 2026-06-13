@@ -4,6 +4,7 @@ import 'package:super_drag_and_drop/super_drag_and_drop.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'bulk_actions.dart';
+import 'dashed_border.dart';
 import 'drop_util.dart';
 import 'fichario.dart';
 import 'file_icons.dart';
@@ -70,16 +71,20 @@ class _StacksBarState extends State<StacksBar> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      // Esquerda: zona de exclusão (Lixeira).
-                      if (dragging) _springIn(_trashZone(scheme)),
-                      for (final s in stacks) _chip(s, scheme, dragging),
-                      // Direita: adicionar nova pilha.
-                      if (dragging &&
-                          stacks.length < StacksController.maxStacks)
-                        _springIn(_newStackZone(scheme)),
-                    ],
+                  // Largura completa: lixeira à esquerda, pilhas, e a
+                  // zona "Nova pilha" empurrada para a direita.
+                  SizedBox(
+                    width: double.infinity,
+                    child: Row(
+                      children: [
+                        if (dragging) _springIn(_trashZone(scheme)),
+                        for (final s in stacks) _chip(s, scheme, dragging),
+                        if (dragging) const Spacer(),
+                        if (dragging &&
+                            stacks.length < StacksController.maxStacks)
+                          _springIn(_newStackZone(scheme)),
+                      ],
+                    ),
                   ),
                   if (_expanded != null && !dragging)
                     _detail(
@@ -163,15 +168,15 @@ class _StacksBarState extends State<StacksBar> {
     );
   }
 
-  /// Entrada com mola (overshoot) para deixar claro que é alvo de drop.
+  /// Entrada suave (fade + leve escala) — sem "pop".
   Widget _springIn(Widget child) {
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.5, end: 1),
-      duration: const Duration(milliseconds: 360),
-      curve: Curves.elasticOut,
-      builder: (context, t, c) => Transform.scale(
-        scale: t.clamp(0.0, 1.2),
-        child: Opacity(opacity: t.clamp(0.0, 1.0), child: c),
+      tween: Tween(begin: 0.0, end: 1),
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+      builder: (context, t, c) => Opacity(
+        opacity: t,
+        child: Transform.scale(scale: 0.85 + 0.15 * t, child: c),
       ),
       child: child,
     );
@@ -194,23 +199,26 @@ class _StacksBarState extends State<StacksBar> {
         if (paths.isNotEmpty) WinShell.moveToRecycleBin(paths);
         setState(() => _trashTarget = false);
       },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
+      child: Container(
         margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: _trashTarget
-              ? const Color(0xFFE5534B).withValues(alpha: 0.35)
-              : Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: const Color(0xFFE5534B)
-                .withValues(alpha: _trashTarget ? 0.9 : 0.4),
+        child: DashedBox(
+          color: const Color(0xFFE5534B)
+              .withValues(alpha: _trashTarget ? 1 : 0.55),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _trashTarget
+                  ? const Color(0xFFE5534B).withValues(alpha: 0.30)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(Icons.delete_outline,
+                size: 18,
+                color: _trashTarget ? Colors.white : const Color(0xFFE5534B)),
           ),
         ),
-        child: Icon(Icons.delete_outline,
-            size: 18,
-            color: _trashTarget ? Colors.white : const Color(0xFFE5534B)),
       ),
     );
   }
@@ -232,27 +240,26 @@ class _StacksBarState extends State<StacksBar> {
         if (paths.isNotEmpty) StacksController.i.createWith(paths);
         setState(() => _newTarget = false);
       },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: _newTarget
-              ? scheme.primary.withValues(alpha: 0.30)
-              : Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: scheme.primary.withValues(alpha: _newTarget ? 0.8 : 0.4),
-            width: 1,
-            style: BorderStyle.solid,
+      child: DashedBox(
+        color: scheme.primary.withValues(alpha: _newTarget ? 1 : 0.55),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: _newTarget
+                ? scheme.primary.withValues(alpha: 0.30)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add, size: 16, color: scheme.primary),
-            const SizedBox(width: 4),
-            const Text('Nova pilha', style: TextStyle(fontSize: 12)),
-          ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.add, size: 16, color: scheme.primary),
+              const SizedBox(width: 4),
+              const Text('Nova pilha', style: TextStyle(fontSize: 12)),
+            ],
+          ),
         ),
       ),
     );

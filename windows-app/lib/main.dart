@@ -197,11 +197,6 @@ class DownsideApp extends StatelessWidget {
               textStyle: const TextStyle(fontSize: 12.5),
             ),
           ),
-          // Cantos arredondados do painel em todas as telas.
-          builder: (context, child) => ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: child,
-          ),
           home: const PanelScaffold(),
         );
       },
@@ -225,6 +220,7 @@ class _PanelScaffoldState extends State<PanelScaffold>
   final TextEditingController _searchCtrl = TextEditingController();
   String _query = '';
   bool _showFichario = false;
+  bool _bookHot = false; // arrasto pairando sobre o livrinho
 
   @override
   void initState() {
@@ -379,12 +375,14 @@ class _PanelScaffoldState extends State<PanelScaffold>
               onDropLeave: (_) => DragWatch.ping(),
               onPerformDrop: _onPerformDrop,
               child: Container(
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: scheme.surface.withValues(alpha: 0.55),
                   border: Border.all(
                     color: Colors.white.withValues(alpha: 0.08),
                   ),
-                  borderRadius: BorderRadius.circular(18),
+                  // Alinhado ao arredondamento nativo do Windows (DWM).
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Stack(
                   children: [
@@ -477,28 +475,51 @@ class _PanelScaffoldState extends State<PanelScaffold>
         }
       },
       builder: (context, cand, rej) {
-        final hot = cand.isNotEmpty;
+        final hot = cand.isNotEmpty || _bookHot;
+        final dragging = DragWatch.active.value || cand.isNotEmpty;
         return DropRegion(
           formats: const [Formats.fileUri],
           hitTestBehavior: HitTestBehavior.opaque,
           onDropOver: (_) {
             DragWatch.ping();
+            if (!_bookHot) setState(() => _bookHot = true);
             return DropOperation.copy;
+          },
+          onDropLeave: (_) {
+            if (_bookHot) setState(() => _bookHot = false);
           },
           onPerformDrop: (event) async {
             final paths = await readDroppedPaths(event);
             if (paths.isNotEmpty) FicharioStore.i.archive(FileStack(0, paths));
+            setState(() => _bookHot = false);
             DragWatch.end();
           },
           child: AnimatedScale(
-            scale: (DragWatch.active.value || hot) ? 1.18 : 1,
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.elasticOut,
-            child: _iconButton(
-              _showFichario ? Icons.menu_book : Icons.menu_book_outlined,
-              'Fichário — solte uma pilha ou arquivos aqui para arquivar',
-              () => setState(() => _showFichario = !_showFichario),
-              active: _showFichario || hot || DragWatch.active.value,
+            scale: hot ? 1.32 : (dragging ? 1.14 : 1),
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeOutBack,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: hot
+                    ? [
+                        BoxShadow(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .primary
+                                .withValues(alpha: 0.6),
+                            blurRadius: 14,
+                            spreadRadius: 1),
+                      ]
+                    : const [],
+              ),
+              child: _iconButton(
+                _showFichario ? Icons.menu_book : Icons.menu_book_outlined,
+                'Fichário — solte uma pilha ou arquivos aqui para arquivar',
+                () => setState(() => _showFichario = !_showFichario),
+                active: _showFichario || hot || dragging,
+              ),
             ),
           ),
         );
