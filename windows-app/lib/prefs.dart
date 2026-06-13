@@ -31,6 +31,9 @@ class Prefs {
   /// Incluir capturas do clipboard na linha do tempo.
   final clipboardEnabled = ValueNotifier<bool>(false);
 
+  /// Chave da API do Claude (opcional, para títulos por IA).
+  final claudeKey = ValueNotifier<String>('');
+
   Future<void> load() async {
     _sp = await SharedPreferences.getInstance();
     final f = _sp.getString('folder');
@@ -46,6 +49,12 @@ class Prefs {
         ? v!
         : 'timeline';
     clipboardEnabled.value = _sp.getBool('clipboardEnabled') ?? false;
+    claudeKey.value = _sp.getString('claudeKey') ?? '';
+  }
+
+  void setClaudeKey(String value) {
+    claudeKey.value = value;
+    _sp.setString('claudeKey', value);
   }
 
   void setViewMode(String value) {

@@ -23,11 +23,13 @@ class _FicharioViewState extends State<FicharioView> {
     super.initState();
     FicharioStore.i.ensureLoaded();
     FicharioStore.i.archived.addListener(_onChange);
+    FicharioStore.i.naming.addListener(_onChange);
   }
 
   @override
   void dispose() {
     FicharioStore.i.archived.removeListener(_onChange);
+    FicharioStore.i.naming.removeListener(_onChange);
     super.dispose();
   }
 
@@ -101,11 +103,25 @@ class _FicharioViewState extends State<FicharioView> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(e.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 12.5, fontWeight: FontWeight.w600)),
+                        if (FicharioStore.i.naming.value.contains(e.id))
+                          Row(
+                            children: [
+                              Icon(Icons.auto_awesome,
+                                  size: 12, color: scheme.primary),
+                              const SizedBox(width: 5),
+                              Text('Gerando título…',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontStyle: FontStyle.italic,
+                                      color: scheme.onSurfaceVariant)),
+                            ],
+                          )
+                        else
+                          Text(e.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 12.5, fontWeight: FontWeight.w600)),
                         Text('${e.paths.length} docs',
                             style: TextStyle(
                                 fontSize: 10.5,

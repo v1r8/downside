@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import 'ai.dart';
 import 'stacks.dart';
 
 /// Uma pilha arquivada no fichário (histórico permanente).
@@ -46,6 +47,9 @@ class FicharioStore {
   static final FicharioStore i = FicharioStore._();
 
   final archived = ValueNotifier<List<ArchivedStack>>([]);
+
+  /// Fichas com título sendo gerado pela IA (efeito de carregamento).
+  final naming = ValueNotifier<Set<String>>({});
   bool _loaded = false;
 
   String get _dir {
@@ -82,6 +86,18 @@ class FicharioStore {
     );
     archived.value = [entry, ...archived.value];
     _save();
+    _nameWithAI(entry);
+  }
+
+  /// Gera o título pela IA em segundo plano (Ollama -> Claude); se não
+  /// houver IA, mantém o título por data.
+  Future<void> _nameWithAI(ArchivedStack entry) async {
+    naming.value = {...naming.value, entry.id};
+    try {
+      final title = await AINamer.titleFor(entry.paths);
+      if (title != null && title.isNotEmpty) rename(entry.id, title);
+    } catch (_) {}
+    naming.value = {...naming.value}..remove(entry.id);
   }
 
   void delete(String id) {

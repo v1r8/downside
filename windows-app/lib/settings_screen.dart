@@ -139,6 +139,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
           ),
+          const SizedBox(height: 8),
+          _sectionTitle('IA (títulos das pilhas)'),
+          Text(
+            'Os títulos do fichário são gerados localmente pelo Ollama '
+            '(grátis) ou, se preferir, pela API do Claude. Sem nenhum dos '
+            'dois, fica o título por data.',
+            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: TextEditingController(text: Prefs.i.claudeKey.value),
+            obscureText: true,
+            style: const TextStyle(fontSize: 13),
+            decoration: const InputDecoration(
+              isDense: true,
+              labelText: 'Chave da API do Claude (opcional)',
+              hintText: 'sk-ant-…',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: Prefs.i.setClaudeKey,
+          ),
           const SizedBox(height: 16),
           _sectionTitle('Atualizações'),
           ListTile(
