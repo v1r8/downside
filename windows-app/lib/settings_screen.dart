@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'clipboard.dart';
-import 'hot_corner.dart';
 import 'prefs.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -26,11 +25,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Color(0xFF22C55E), // verde
   ];
 
-  static const Map<HotCorner, String> _cornerLabels = {
-    HotCorner.topLeft: 'Superior esquerdo',
-    HotCorner.topRight: 'Superior direito',
-    HotCorner.bottomLeft: 'Inferior esquerdo',
-    HotCorner.bottomRight: 'Inferior direito',
+  static const Map<String, String> _triggerLabels = {
+    'topLeft': 'Canto superior esquerdo',
+    'topRight': 'Canto superior direito',
+    'bottomLeft': 'Canto inferior esquerdo',
+    'bottomRight': 'Canto inferior direito',
+    'left': 'Lateral esquerda',
+    'right': 'Lateral direita',
+  };
+
+  static const Map<String, String> _clipMarkLabels = {
+    'badge': 'Selo de clipboard',
+    'bar': 'Barra lateral colorida',
+    'tint': 'Fundo levemente tingido',
   };
 
   @override
@@ -72,19 +79,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          _sectionTitle('Abertura'),
-          ValueListenableBuilder<HotCorner>(
-            valueListenable: Prefs.i.corner,
-            builder: (_, corner, __) => Column(
+          _sectionTitle('Abertura (cantos e laterais)'),
+          ValueListenableBuilder<Set<String>>(
+            valueListenable: Prefs.i.triggers,
+            builder: (_, triggers, __) => Column(
               children: [
-                for (final entry in _cornerLabels.entries)
-                  RadioListTile<HotCorner>(
+                for (final entry in _triggerLabels.entries)
+                  SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     dense: true,
                     title: Text(entry.value),
-                    value: entry.key,
-                    groupValue: corner,
-                    onChanged: (v) => Prefs.i.setCorner(v!),
+                    value: triggers.contains(entry.key),
+                    onChanged: (_) => Prefs.i.toggleTrigger(entry.key),
                   ),
               ],
             ),
@@ -159,6 +165,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ClipboardMonitor.i.stop();
                 }
               },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 2),
+            child: Text('Como destacar os itens do clipboard:',
+                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+          ),
+          ValueListenableBuilder<String>(
+            valueListenable: Prefs.i.clipboardMark,
+            builder: (_, mark, __) => Wrap(
+              spacing: 8,
+              children: [
+                for (final entry in _clipMarkLabels.entries)
+                  ChoiceChip(
+                    label: Text(entry.value, style: const TextStyle(fontSize: 11)),
+                    selected: mark == entry.key,
+                    onSelected: (_) => Prefs.i.setClipboardMark(entry.key),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 8),

@@ -103,11 +103,11 @@ class PanelController {
   /// Incrementa a cada abertura — dispara a animação de entrada.
   final ValueNotifier<int> showTick = ValueNotifier<int>(0);
 
-  Future<void> showAt(HotCorner corner) async {
+  Future<void> showAt(String trigger) async {
     // Já aberto: não reabre nem re-anima (evita "piscar/novas aberturas"
     // ao mexer o mouse no canto repetidamente).
     if (visible) return;
-    await windowManager.setAlignment(_alignmentFor(corner));
+    await windowManager.setAlignment(_alignmentFor(trigger));
     await windowManager.show();
     await windowManager.focus();
     visible = true;
@@ -148,15 +148,19 @@ class PanelController {
     }
   }
 
-  Alignment _alignmentFor(HotCorner c) {
-    switch (c) {
-      case HotCorner.topLeft:
+  Alignment _alignmentFor(String t) {
+    switch (t) {
+      case 'topLeft':
         return Alignment.topLeft;
-      case HotCorner.topRight:
+      case 'topRight':
         return Alignment.topRight;
-      case HotCorner.bottomLeft:
+      case 'bottomLeft':
         return Alignment.bottomLeft;
-      case HotCorner.bottomRight:
+      case 'left':
+        return Alignment.centerLeft;
+      case 'right':
+        return Alignment.centerRight;
+      default:
         return Alignment.bottomRight;
     }
   }
@@ -179,6 +183,17 @@ class DownsideApp extends StatelessWidget {
             colorScheme: ColorScheme.fromSeed(
               seedColor: accent,
               brightness: Brightness.dark,
+            ),
+            // Menu de contexto translúcido, arredondado e bonito.
+            popupMenuTheme: PopupMenuThemeData(
+              color: const Color(0xF21E1E24),
+              surfaceTintColor: Colors.transparent,
+              elevation: 12,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+              ),
+              textStyle: const TextStyle(fontSize: 12.5),
             ),
           ),
           // Cantos arredondados do painel em todas as telas.
@@ -224,8 +239,8 @@ class _PanelScaffoldState extends State<PanelScaffold>
     DragWatch.active.addListener(_onDragChange);
     _initTray();
     _hotCorner = HotCornerService(
-      onTrigger: (corner) => panel.showAt(corner),
-      enabledCorner: () => Prefs.i.corner.value,
+      onTrigger: (trigger) => panel.showAt(trigger),
+      enabledTriggers: () => Prefs.i.triggers.value,
     );
     _hotCorner.start();
     // Vigia de fechamento por distância do mouse (como no Mac).
@@ -243,6 +258,12 @@ class _PanelScaffoldState extends State<PanelScaffold>
 
   void _onDragChange() {
     if (mounted) setState(() {});
+  }
+
+  String _defaultTrigger() {
+    final t = Prefs.i.triggers.value;
+    if (t.contains('bottomRight') || t.isEmpty) return 'bottomRight';
+    return t.first;
   }
 
   @override
@@ -295,7 +316,7 @@ class _PanelScaffoldState extends State<PanelScaffold>
   void onWindowBlur() => panel.handleBlur();
 
   @override
-  void onTrayIconMouseDown() => panel.showAt(Prefs.i.corner.value);
+  void onTrayIconMouseDown() => panel.showAt(_defaultTrigger());
 
   @override
   void onTrayIconRightMouseDown() => trayManager.popUpContextMenu();
@@ -304,10 +325,10 @@ class _PanelScaffoldState extends State<PanelScaffold>
   void onTrayMenuItemClick(MenuItem menuItem) {
     switch (menuItem.key) {
       case 'show':
-        panel.showAt(Prefs.i.corner.value);
+        panel.showAt(_defaultTrigger());
         break;
       case 'settings':
-        panel.showAt(Prefs.i.corner.value);
+        panel.showAt(_defaultTrigger());
         _openSettings();
         break;
       case 'check_updates':

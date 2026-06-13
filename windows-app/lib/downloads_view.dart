@@ -51,6 +51,7 @@ class _DownloadsViewState extends State<DownloadsView> {
     Prefs.i.folder.addListener(_onFolderChanged);
     Prefs.i.viewMode.addListener(_onViewChanged);
     Prefs.i.clipboardEnabled.addListener(_onViewChanged);
+    Prefs.i.clipboardMark.addListener(_onViewChanged);
     ClipboardMonitor.i.items.addListener(_onViewChanged);
   }
 
@@ -59,6 +60,7 @@ class _DownloadsViewState extends State<DownloadsView> {
     Prefs.i.folder.removeListener(_onFolderChanged);
     Prefs.i.viewMode.removeListener(_onViewChanged);
     Prefs.i.clipboardEnabled.removeListener(_onViewChanged);
+    Prefs.i.clipboardMark.removeListener(_onViewChanged);
     ClipboardMonitor.i.items.removeListener(_onViewChanged);
     _watchSub?.cancel();
     _debounce?.cancel();
@@ -282,6 +284,8 @@ class _DownloadsViewState extends State<DownloadsView> {
         final cell = _cellDecoration(
           selected: _selection.contains(e.path),
           scheme: scheme,
+          clipTint: e.isClip && _clipTint,
+          clipBar: e.isClip && _clipBar,
           child: Column(
             children: [
               _leading(e, 40, scheme),
@@ -337,6 +341,8 @@ class _DownloadsViewState extends State<DownloadsView> {
         final row = _cellDecoration(
           selected: _selection.contains(e.path),
           scheme: scheme,
+          clipTint: e.isClip && _clipTint,
+          clipBar: e.isClip && _clipBar,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Row(
             children: [
@@ -364,21 +370,46 @@ class _DownloadsViewState extends State<DownloadsView> {
     );
   }
 
+  static const Color _clipColor = Color(0xFFB388FF);
+
   Widget _cellDecoration({
     required bool selected,
     required ColorScheme scheme,
     required Widget child,
     required EdgeInsets padding,
+    bool clipTint = false,
+    bool clipBar = false,
   }) {
-    return Container(
+    final base = Container(
       margin: const EdgeInsets.symmetric(vertical: 1),
       padding: padding,
       decoration: BoxDecoration(
-        color:
-            selected ? scheme.primary.withValues(alpha: 0.22) : Colors.transparent,
+        color: selected
+            ? scheme.primary.withValues(alpha: 0.22)
+            : clipTint
+                ? _clipColor.withValues(alpha: 0.10)
+                : Colors.transparent,
         borderRadius: BorderRadius.circular(9),
       ),
       child: child,
+    );
+    if (!clipBar) return base;
+    return Stack(
+      children: [
+        base,
+        Positioned(
+          left: 2,
+          top: 6,
+          bottom: 6,
+          child: Container(
+            width: 3,
+            decoration: BoxDecoration(
+              color: _clipColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -434,10 +465,15 @@ class _DownloadsViewState extends State<DownloadsView> {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
+  bool get _clipBadge =>
+      Prefs.i.clipboardMark.value == 'badge';
+  bool get _clipTint => Prefs.i.clipboardMark.value == 'tint';
+  bool get _clipBar => Prefs.i.clipboardMark.value == 'bar';
+
   /// Icone do item, com um pequeno selo de clipboard quando aplicavel.
   Widget _leading(_Entry e, double size, ColorScheme scheme) {
     final icon = Icon(_iconFor(e), size: size, color: _colorFor(e, scheme));
-    if (!e.isClip) return icon;
+    if (!e.isClip || !_clipBadge) return icon;
     return Stack(
       clipBehavior: Clip.none,
       children: [

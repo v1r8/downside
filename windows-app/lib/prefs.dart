@@ -4,7 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'hot_corner.dart';
+/// Chaves dos gatilhos de abertura (cantos + laterais).
+const kTriggerKeys = [
+  'topLeft',
+  'topRight',
+  'bottomLeft',
+  'bottomRight',
+  'left',
+  'right',
+];
 
 String defaultDownloads() {
   final home = Platform.environment['USERPROFILE'] ??
@@ -22,7 +30,13 @@ class Prefs {
   late SharedPreferences _sp;
 
   final folder = ValueNotifier<String>('');
-  final corner = ValueNotifier<HotCorner>(HotCorner.bottomRight);
+
+  /// Gatilhos ativos: cantos (topLeft/…/bottomRight) e laterais (left/right).
+  final triggers = ValueNotifier<Set<String>>({'bottomRight'});
+
+  /// Estilo da marca dos itens do clipboard: 'badge' | 'bar' | 'tint'.
+  final clipboardMark = ValueNotifier<String>('badge');
+
   final accent = ValueNotifier<Color>(const Color(0xFF2E7DF6));
 
   /// 'timeline' | 'grid' | 'list' — padrão linha do tempo (como no Mac).
@@ -38,10 +52,12 @@ class Prefs {
     _sp = await SharedPreferences.getInstance();
     final f = _sp.getString('folder');
     folder.value = (f != null && f.isNotEmpty) ? f : defaultDownloads();
-    final c = _sp.getInt('corner');
-    corner.value = (c != null && c >= 0 && c < HotCorner.values.length)
-        ? HotCorner.values[c]
-        : HotCorner.bottomRight;
+    final t = _sp.getStringList('triggers');
+    triggers.value = (t != null && t.isNotEmpty)
+        ? t.where(kTriggerKeys.contains).toSet()
+        : {'bottomRight'};
+    if (triggers.value.isEmpty) triggers.value = {'bottomRight'};
+    clipboardMark.value = _sp.getString('clipboardMark') ?? 'badge';
     final a = _sp.getInt('accent');
     accent.value = a != null ? Color(a) : const Color(0xFF2E7DF6);
     final v = _sp.getString('viewMode');
@@ -72,9 +88,17 @@ class Prefs {
     _sp.setString('folder', value);
   }
 
-  void setCorner(HotCorner value) {
-    corner.value = value;
-    _sp.setInt('corner', value.index);
+  void toggleTrigger(String key) {
+    final s = {...triggers.value};
+    if (!s.add(key)) s.remove(key);
+    if (s.isEmpty) s.add('bottomRight'); // sempre ao menos um
+    triggers.value = s;
+    _sp.setStringList('triggers', s.toList());
+  }
+
+  void setClipboardMark(String value) {
+    clipboardMark.value = value;
+    _sp.setString('clipboardMark', value);
   }
 
   void setAccent(Color value) {

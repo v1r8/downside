@@ -5,8 +5,6 @@ import 'dart:ui';
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
 
-enum HotCorner { topLeft, topRight, bottomLeft, bottomRight }
-
 /// Posição global do cursor em pixels físicos (ou null em falha).
 Offset? globalCursorPhysical() {
   final p = calloc<POINT>();
@@ -18,25 +16,25 @@ Offset? globalCursorPhysical() {
   }
 }
 
-/// Detecta o mouse parado num canto da tela, espelhando a abordagem do
-/// Mac: polling leve (~16x/s) da posição global do cursor via Win32
-/// (sem hook elevado / UAC), com tempo de permanência (dwell) e
-/// rearme só depois que o mouse sai do canto.
+/// Detecta o mouse parado num canto OU numa lateral da tela. Polling
+/// leve (~16x/s) da posição global do cursor via Win32 (sem hook), com
+/// tempo de permanência (dwell) e rearme ao sair. O conjunto de
+/// gatilhos ativos é lido das preferências a cada verificação.
 class HotCornerService {
-  HotCornerService({required this.onTrigger, required this.enabledCorner});
+  HotCornerService({required this.onTrigger, required this.enabledTriggers});
 
-  final void Function(HotCorner corner) onTrigger;
-
-  /// Canto ativo, lido das preferências a cada verificação.
-  final HotCorner Function() enabledCorner;
+  final void Function(String trigger) onTrigger;
+  final Set<String> Function() enabledTriggers;
 
   Timer? _timer;
-  HotCorner? _dwellCorner;
+  String? _dwellKey;
   DateTime? _dwellStart;
   bool _armed = true;
 
   static const Duration _dwell = Duration(milliseconds: 120);
-  static const int _zone = 6; // px físicos
+  static const int _zone = 6; // px físicos (cantos)
+  static const int _edge = 2; // px físicos (laterais)
+  static const int _band = 120; // margem que separa lateral dos cantos
 
   void start() {
     _timer?.cancel();
@@ -63,36 +61,45 @@ class HotCornerService {
     final h = GetSystemMetrics(SM_CYSCREEN);
     if (w <= 0 || h <= 0) return;
 
-    HotCorner? inCorner;
+    final enabled = enabledTriggers();
+    String? key;
+
+    // Cantos primeiro.
     if (x <= _zone && y <= _zone) {
-      inCorner = HotCorner.topLeft;
+      key = 'topLeft';
     } else if (x >= w - 1 - _zone && y <= _zone) {
-      inCorner = HotCorner.topRight;
+      key = 'topRight';
     } else if (x <= _zone && y >= h - 1 - _zone) {
-      inCorner = HotCorner.bottomLeft;
+      key = 'bottomLeft';
     } else if (x >= w - 1 - _zone && y >= h - 1 - _zone) {
-      inCorner = HotCorner.bottomRight;
+      key = 'bottomRight';
+    } else if (y > _band && y < h - _band) {
+      // Laterais (fora da faixa dos cantos).
+      if (x <= _edge) {
+        key = 'left';
+      } else if (x >= w - 1 - _edge) {
+        key = 'right';
+      }
     }
 
-    // Só o canto habilitado conta.
-    final active = inCorner == enabledCorner() ? inCorner : null;
+    final active = (key != null && enabled.contains(key)) ? key : null;
 
     if (active != null) {
       if (!_armed) return;
-      if (_dwellCorner == active && _dwellStart != null) {
+      if (_dwellKey == active && _dwellStart != null) {
         if (DateTime.now().difference(_dwellStart!) >= _dwell) {
           _dwellStart = null;
-          _dwellCorner = null;
-          _armed = false; // só rearma quando sair do canto
+          _dwellKey = null;
+          _armed = false;
           onTrigger(active);
         }
       } else {
-        _dwellCorner = active;
+        _dwellKey = active;
         _dwellStart = DateTime.now();
       }
     } else {
       _dwellStart = null;
-      _dwellCorner = null;
+      _dwellKey = null;
       _armed = true;
     }
   }
