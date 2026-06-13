@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'prefs.dart';
+// File e p já vêm de dart:io e package:path acima.
 
 /// LLM local (Ollama) — gratis, no aparelho. Portado do Mac.
 class OllamaService {
@@ -118,6 +119,33 @@ class AINamer {
     if (key.isNotEmpty) {
       final t = _clean(await ClaudeService.complete(prompt, key));
       if (t != null) return t;
+    }
+    return null;
+  }
+
+  /// Apelido curto para um ARQUIVO (nomes inteligentes). Lê o conteúdo
+  /// de textos para descrever melhor.
+  static Future<String?> nameForFile(String path) async {
+    final base = p.basename(path);
+    var context = 'Arquivo: $base';
+    final ext = p.extension(path).toLowerCase();
+    if (const {'.txt', '.md', '.csv', '.json', '.log'}.contains(ext)) {
+      try {
+        final c = await File(path).readAsString();
+        context += '\nConteúdo: ${c.length > 500 ? c.substring(0, 500) : c}';
+      } catch (_) {}
+    }
+    final prompt = 'Sugira um nome curto e claro (2 a 6 palavras, em '
+        'português, sem extensão, sem aspas, sem barras) que descreva este '
+        'documento pelo conteúdo real. Responda APENAS com o nome:\n\n$context';
+    if (await OllamaService.isRunning()) {
+      final r = _clean(await OllamaService.generate(prompt, numPredict: 30));
+      if (r != null) return r;
+    }
+    final key = Prefs.i.claudeKey.value.trim();
+    if (key.isNotEmpty) {
+      final r = _clean(await ClaudeService.complete(prompt, key, maxTokens: 30));
+      if (r != null) return r;
     }
     return null;
   }

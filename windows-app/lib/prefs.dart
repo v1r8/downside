@@ -52,6 +52,9 @@ class Prefs {
   final hoverEnabled = ValueNotifier<bool>(true);
   final hoverDelay = ValueNotifier<int>(600); // ms
 
+  /// Nomes inteligentes dos arquivos (apelido por IA local) — só visual.
+  final smartNames = ValueNotifier<bool>(false);
+
   Future<void> load() async {
     _sp = await SharedPreferences.getInstance();
     final f = _sp.getString('folder');
@@ -72,6 +75,12 @@ class Prefs {
     claudeKey.value = _sp.getString('claudeKey') ?? '';
     hoverEnabled.value = _sp.getBool('hoverEnabled') ?? true;
     hoverDelay.value = _sp.getInt('hoverDelay') ?? 600;
+    smartNames.value = _sp.getBool('smartNames') ?? false;
+  }
+
+  void setSmartNames(bool v) {
+    smartNames.value = v;
+    _sp.setBool('smartNames', v);
   }
 
   void setHoverEnabled(bool v) {

@@ -226,6 +226,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 8),
+          _sectionTitle('Nomes inteligentes'),
+          ValueListenableBuilder<bool>(
+            valueListenable: Prefs.i.smartNames,
+            builder: (_, on, __) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('Nomear arquivos com IA local'),
+              subtitle: const Text(
+                  'Apelidos legíveis (Ollama/Claude) — só visual; o arquivo '
+                  'no disco não muda. O tipo vira uma etiqueta ao lado.'),
+              value: on,
+              onChanged: Prefs.i.setSmartNames,
+            ),
+          ),
+          const SizedBox(height: 8),
           _sectionTitle('IA (títulos das pilhas)'),
           Text(
             'Os títulos do fichário são gerados localmente pelo Ollama '

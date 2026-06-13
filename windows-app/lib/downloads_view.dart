@@ -9,9 +9,11 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:watcher/watcher.dart';
 
 import 'clipboard.dart';
+import 'magic_name.dart';
 import 'prefs.dart';
 import 'preview.dart';
 import 'search.dart';
+import 'smart_names.dart';
 import 'win_shell.dart';
 
 class _Entry {
@@ -53,7 +55,10 @@ class _DownloadsViewState extends State<DownloadsView> {
     Prefs.i.viewMode.addListener(_onViewChanged);
     Prefs.i.clipboardEnabled.addListener(_onViewChanged);
     Prefs.i.clipboardMark.addListener(_onViewChanged);
+    Prefs.i.smartNames.addListener(_onViewChanged);
     ClipboardMonitor.i.items.addListener(_onViewChanged);
+    SmartNameStore.i.names.addListener(_onViewChanged);
+    SmartNameStore.i.pending.addListener(_onViewChanged);
   }
 
   @override
@@ -62,7 +67,10 @@ class _DownloadsViewState extends State<DownloadsView> {
     Prefs.i.viewMode.removeListener(_onViewChanged);
     Prefs.i.clipboardEnabled.removeListener(_onViewChanged);
     Prefs.i.clipboardMark.removeListener(_onViewChanged);
+    Prefs.i.smartNames.removeListener(_onViewChanged);
     ClipboardMonitor.i.items.removeListener(_onViewChanged);
+    SmartNameStore.i.names.removeListener(_onViewChanged);
+    SmartNameStore.i.pending.removeListener(_onViewChanged);
     _watchSub?.cancel();
     _debounce?.cancel();
     super.dispose();
@@ -282,6 +290,7 @@ class _DownloadsViewState extends State<DownloadsView> {
       itemCount: items.length,
       itemBuilder: (context, i) {
         final e = items[i];
+        SmartNameStore.i.ensureName(e.path, isDir: e.isDir);
         final cell = _cellDecoration(
           selected: _selection.contains(e.path),
           scheme: scheme,
@@ -292,11 +301,15 @@ class _DownloadsViewState extends State<DownloadsView> {
               _leading(e, 40, scheme),
               const SizedBox(height: 6),
               Expanded(
-                child: Text(e.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 11)),
+                child: Center(
+                  child: SmartNameStore.i.isPending(e.path)
+                      ? const MagicName(width: 64, center: true)
+                      : Text(SmartNameStore.i.displayName(e.path, e.name),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 11)),
+                ),
               ),
             ],
           ),
@@ -338,6 +351,7 @@ class _DownloadsViewState extends State<DownloadsView> {
           );
         }
         final e = r as _Entry;
+        SmartNameStore.i.ensureName(e.path, isDir: e.isDir);
         final index = items.indexOf(e);
         final row = _cellDecoration(
           selected: _selection.contains(e.path),
@@ -353,10 +367,24 @@ class _DownloadsViewState extends State<DownloadsView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(e.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12.5)),
+                    if (SmartNameStore.i.isPending(e.path))
+                      const MagicName(width: 120)
+                    else
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                                SmartNameStore.i.displayName(e.path, e.name),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 12.5)),
+                          ),
+                          if (SmartNameStore.i.tag(e.path, e.isDir) != null) ...[
+                            const SizedBox(width: 5),
+                            TypeTag(SmartNameStore.i.tag(e.path, e.isDir)!),
+                          ],
+                        ],
+                      ),
                     Text(_meta(e),
                         style: TextStyle(
                             fontSize: 10.5, color: scheme.onSurfaceVariant)),
