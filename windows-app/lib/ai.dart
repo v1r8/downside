@@ -85,6 +85,23 @@ class ClaudeService {
   }
 }
 
+/// Texto longo (resumos, palavras-chave): Ollama local -> Claude.
+class AIText {
+  static Future<String?> complete(String prompt, {int maxTokens = 800}) async {
+    if (await OllamaService.isRunning()) {
+      final r = await OllamaService.generate(prompt, numPredict: maxTokens);
+      if (r != null && r.trim().isNotEmpty) return r.trim();
+    }
+    final key = Prefs.i.claudeKey.value.trim();
+    if (key.isNotEmpty) {
+      final r = await ClaudeService.complete(prompt, key,
+          model: 'claude-sonnet-4-6', maxTokens: maxTokens);
+      if (r != null && r.trim().isNotEmpty) return r.trim();
+    }
+    return null;
+  }
+}
+
 /// Cadeia de nomeacao: Ollama (local) -> Claude -> nulo (mantem data).
 class AINamer {
   static Future<String?> titleFor(List<String> paths) async {

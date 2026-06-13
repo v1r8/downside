@@ -3,9 +3,11 @@ import 'package:path/path.dart' as p;
 import 'package:super_drag_and_drop/super_drag_and_drop.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'bulk_actions.dart';
 import 'drop_util.dart';
 import 'fichario.dart';
 import 'file_icons.dart';
+import 'holo_card.dart';
 import 'stacks.dart';
 import 'win_shell.dart';
 
@@ -24,6 +26,10 @@ class _StacksBarState extends State<StacksBar> {
   int? _target; // chip sob o cursor durante o drop
   bool _newTarget = false;
   bool _trashTarget = false;
+  int? _runningId;
+  String? _runningLabel;
+  String? _runningMsg;
+  int? _runningMsgId;
 
   @override
   void initState() {
@@ -110,7 +116,7 @@ class _StacksBarState extends State<StacksBar> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _deck(s.paths, 22, scheme),
+          _deck(s.paths, 22, scheme, holo: s.hadBulkAction),
           const SizedBox(width: 8),
           Text('${s.paths.length}',
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
@@ -253,6 +259,9 @@ class _StacksBarState extends State<StacksBar> {
   }
 
   Widget _detail(FileStack s, ColorScheme scheme) {
+    final originals = s.paths.where((path) => !s.outputs.contains(path)).toList();
+    final outputs = s.paths.where((path) => s.outputs.contains(path)).toList();
+    final running = _runningId == s.id;
     return Container(
       margin: const EdgeInsets.only(top: 6),
       padding: const EdgeInsets.all(8),
@@ -264,29 +273,132 @@ class _StacksBarState extends State<StacksBar> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final path in s.paths) _fileRow(s, path, scheme),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              _action(Icons.open_in_new, 'Abrir todos', () {
-                for (final path in s.paths) {
-                  launchUrl(Uri.file(path));
-                }
-              }, scheme),
-              const SizedBox(width: 8),
-              _action(Icons.archive_outlined, 'Arquivar', () {
-                FicharioStore.i.archive(s);
-                StacksController.i.clearStack(s.id);
-              }, scheme),
-              const SizedBox(width: 8),
-              _action(Icons.close, 'Limpar', () {
-                StacksController.i.clearStack(s.id);
-              }, scheme),
-            ],
+          for (final path in originals) _fileRow(s, path, scheme),
+          if (outputs.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [for (final o in outputs) _outputChip(s, o, scheme)],
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          if (running)
+            Row(
+              children: [
+                const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 8),
+                Text(_runningLabel ?? '…',
+                    style: TextStyle(
+                        fontSize: 11, color: scheme.onSurfaceVariant)),
+              ],
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                _action(Icons.open_in_new, 'Abrir', () {
+                  for (final path in s.paths) {
+                    launchUrl(Uri.file(path));
+                  }
+                }, scheme),
+                _action(Icons.link, 'Baixar links',
+                    () => _run(s, 'Baixando…', BulkRunner.downloadLinks), scheme),
+                _action(Icons.summarize_outlined, 'Resumir',
+                    () => _run(s, 'Resumindo…', BulkRunner.summarize), scheme),
+                _action(Icons.sell_outlined, 'Palavras-chave',
+                    () => _run(s, 'Caracterizando…', BulkRunner.keywords), scheme),
+                _action(Icons.archive_outlined, 'Arquivar', () {
+                  FicharioStore.i.archive(s);
+                  StacksController.i.clearStack(s.id);
+                }, scheme),
+                _action(Icons.close, 'Limpar',
+                    () => StacksController.i.clearStack(s.id), scheme),
+              ],
+            ),
+          if (_runningMsg != null && running == false && _runningMsgId == s.id)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(_runningMsg!,
+                  style:
+                      TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Output (gerado por IA/ação): chip com ✨ + brilho holográfico.
+  Widget _outputChip(FileStack s, String path, ColorScheme scheme) {
+    final name = p.basename(path);
+    return Container(
+      margin: const EdgeInsets.only(right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFB388FF).withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: const Color(0xFFB388FF).withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const HoloCard(width: 10, height: 14),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: () => launchUrl(Uri.file(path)),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: Text(name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10.5)),
+            ),
+          ),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: () => StacksController.i.removeFromStack(s.id, path),
+            child: Icon(Icons.close, size: 12, color: scheme.onSurfaceVariant),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _run(FileStack s, String label,
+      Future<List<String>> Function(FileStack) action) async {
+    if (_runningId != null) return;
+    setState(() {
+      _runningId = s.id;
+      _runningLabel = label;
+      _runningMsg = null;
+    });
+    String msg;
+    try {
+      final outs = await action(s);
+      for (final o in outs) {
+        StacksController.i.addOutput(s.id, o);
+      }
+      msg = outs.isEmpty ? 'Nada para processar' : 'Concluído ✓';
+    } on NoAIException {
+      msg = 'Precisa de IA: Ollama rodando ou chave do Claude';
+    } catch (_) {
+      msg = 'Não foi possível concluir';
+    }
+    if (!mounted) return;
+    setState(() {
+      _runningId = null;
+      _runningLabel = null;
+      _runningMsg = msg;
+      _runningMsgId = s.id;
+    });
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted && _runningMsg == msg) setState(() => _runningMsg = null);
+    });
   }
 
   Widget _fileRow(FileStack s, String path, ColorScheme scheme) {
@@ -312,18 +424,29 @@ class _StacksBarState extends State<StacksBar> {
     );
   }
 
-  Widget _deck(List<String> paths, double size, ColorScheme scheme) {
+  Widget _deck(List<String> paths, double size, ColorScheme scheme,
+      {bool holo = false}) {
     final shown = paths.take(3).toList();
     final n = shown.length;
+    final shift = holo ? size * 0.42 : 0.0;
     return SizedBox(
-      width: size + (n <= 1 ? 0 : (n - 1) * size * 0.32),
+      width: shift + size + (n <= 1 ? 0 : (n - 1) * size * 0.32),
       height: size,
       child: Stack(
+        clipBehavior: Clip.none,
         alignment: Alignment.centerLeft,
         children: [
+          if (holo)
+            Positioned(
+              left: 0,
+              child: Transform.rotate(
+                angle: -0.18,
+                child: HoloCard(width: size * 0.62, height: size * 0.88),
+              ),
+            ),
           for (var idx = 0; idx < n; idx++)
             Positioned(
-              left: idx * size * 0.32,
+              left: shift + idx * size * 0.32,
               child: Transform.rotate(
                 angle: (idx - (n - 1) / 2) * 0.14,
                 child: Icon(iconForName(p.basename(shown[idx])),
