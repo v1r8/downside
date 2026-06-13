@@ -119,6 +119,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 8),
+          _sectionTitle('Exibição'),
+          ValueListenableBuilder<String>(
+            valueListenable: Prefs.i.viewMode,
+            builder: (_, mode, __) => Column(
+              children: [
+                for (final entry in const {
+                  'timeline': 'Linha do tempo',
+                  'grid': 'Grade',
+                  'list': 'Lista',
+                }.entries)
+                  RadioListTile<String>(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: Text(entry.value),
+                    value: entry.key,
+                    groupValue: mode,
+                    onChanged: (v) => Prefs.i.setViewMode(v!),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
           _sectionTitle('Clipboard'),
           ValueListenableBuilder<bool>(
             valueListenable: Prefs.i.clipboardEnabled,

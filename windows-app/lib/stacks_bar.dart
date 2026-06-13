@@ -7,6 +7,7 @@ import 'drop_util.dart';
 import 'fichario.dart';
 import 'file_icons.dart';
 import 'stacks.dart';
+import 'win_shell.dart';
 
 /// Barra das pilhas provisorias (deck de cartas). Aparece quando ha
 /// pilhas OU durante um arrasto (mostrando zonas de drop): cada pilha
@@ -22,6 +23,7 @@ class _StacksBarState extends State<StacksBar> {
   int? _expanded;
   int? _target; // chip sob o cursor durante o drop
   bool _newTarget = false;
+  bool _trashTarget = false;
 
   @override
   void initState() {
@@ -64,10 +66,13 @@ class _StacksBarState extends State<StacksBar> {
                 children: [
                   Row(
                     children: [
+                      // Esquerda: zona de exclusão (Lixeira).
+                      if (dragging) _springIn(_trashZone(scheme)),
                       for (final s in stacks) _chip(s, scheme, dragging),
+                      // Direita: adicionar nova pilha.
                       if (dragging &&
                           stacks.length < StacksController.maxStacks)
-                        _newStackZone(scheme),
+                        _springIn(_newStackZone(scheme)),
                     ],
                   ),
                   if (_expanded != null && !dragging)
@@ -149,6 +154,58 @@ class _StacksBarState extends State<StacksBar> {
         child: Opacity(opacity: 0.9, child: _deck(s.paths, 26, scheme)),
       ),
       child: dropTarget,
+    );
+  }
+
+  /// Entrada com mola (overshoot) para deixar claro que é alvo de drop.
+  Widget _springIn(Widget child) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.5, end: 1),
+      duration: const Duration(milliseconds: 360),
+      curve: Curves.elasticOut,
+      builder: (context, t, c) => Transform.scale(
+        scale: t.clamp(0.0, 1.2),
+        child: Opacity(opacity: t.clamp(0.0, 1.0), child: c),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _trashZone(ColorScheme scheme) {
+    return DropRegion(
+      formats: const [Formats.fileUri],
+      hitTestBehavior: HitTestBehavior.opaque,
+      onDropOver: (_) {
+        DragWatch.ping();
+        if (!_trashTarget) setState(() => _trashTarget = true);
+        return DropOperation.copy;
+      },
+      onDropLeave: (_) {
+        if (_trashTarget) setState(() => _trashTarget = false);
+      },
+      onPerformDrop: (event) async {
+        final paths = await readDroppedPaths(event);
+        if (paths.isNotEmpty) WinShell.moveToRecycleBin(paths);
+        setState(() => _trashTarget = false);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: _trashTarget
+              ? const Color(0xFFE5534B).withValues(alpha: 0.35)
+              : Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: const Color(0xFFE5534B)
+                .withValues(alpha: _trashTarget ? 0.9 : 0.4),
+          ),
+        ),
+        child: Icon(Icons.delete_outline,
+            size: 18,
+            color: _trashTarget ? Colors.white : const Color(0xFFE5534B)),
+      ),
     );
   }
 

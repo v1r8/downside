@@ -20,6 +20,7 @@ import 'settings_screen.dart';
 import 'single_instance.dart';
 import 'stacks.dart';
 import 'stacks_bar.dart';
+import 'window_corners.dart';
 
 const String kFeedURL =
     'https://github.com/v1r8/downside/releases/download/windows/appcast-win.xml';
@@ -63,6 +64,7 @@ Future<void> main() async {
     } catch (_) {}
     await windowManager.hide();
   });
+  roundWindowCorners();
 
   if (Prefs.i.clipboardEnabled.value) {
     ClipboardMonitor.i.start();
@@ -219,6 +221,7 @@ class _PanelScaffoldState extends State<PanelScaffold>
       value: 1,
     );
     panel.showTick.addListener(_onShow);
+    DragWatch.active.addListener(_onDragChange);
     _initTray();
     _hotCorner = HotCornerService(
       onTrigger: (corner) => panel.showAt(corner),
@@ -238,9 +241,14 @@ class _PanelScaffoldState extends State<PanelScaffold>
     _anim.forward(from: 0);
   }
 
+  void _onDragChange() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
     panel.showTick.removeListener(_onShow);
+    DragWatch.active.removeListener(_onDragChange);
     _hotCorner.stop();
     _autoHide?.cancel();
     _anim.dispose();
@@ -269,10 +277,9 @@ class _PanelScaffoldState extends State<PanelScaffold>
     } catch (_) {}
   }
 
-  /// Arrastar arquivos para o painel (fora dos chips) cria uma pilha.
+  /// Soltar fora das zonas (ex.: na timeline) NÃO faz nada — só as
+  /// zonas (nova pilha / chip / lixeira / fichário) executam ações.
   Future<void> _onPerformDrop(PerformDropEvent event) async {
-    final paths = await readDroppedPaths(event);
-    if (paths.isNotEmpty) StacksController.i.createWith(paths);
     DragWatch.end();
   }
 
@@ -391,12 +398,21 @@ class _PanelScaffoldState extends State<PanelScaffold>
                 const SizedBox(width: 6),
                 Expanded(child: _searchField(scheme)),
                 const SizedBox(width: 6),
-                ValueListenableBuilder<String>(
-                  valueListenable: Prefs.i.viewMode,
-                  builder: (_, mode, __) => _iconButton(
-                    _viewIcon(mode),
-                    'Visualização: ${_viewLabel(mode)}',
-                    _cycleView,
+                ValueListenableBuilder<bool>(
+                  valueListenable: Prefs.i.clipboardEnabled,
+                  builder: (_, on, __) => _iconButton(
+                    on ? Icons.content_paste : Icons.content_paste_outlined,
+                    on ? 'Ocultar itens do clipboard' : 'Mostrar itens do clipboard',
+                    () {
+                      final next = !on;
+                      Prefs.i.setClipboardEnabled(next);
+                      if (next) {
+                        ClipboardMonitor.i.start();
+                      } else {
+                        ClipboardMonitor.i.stop();
+                      }
+                    },
+                    active: on,
                   ),
                 ),
                 _iconButton(
@@ -442,43 +458,20 @@ class _PanelScaffoldState extends State<PanelScaffold>
             if (paths.isNotEmpty) FicharioStore.i.archive(FileStack(0, paths));
             DragWatch.end();
           },
-          child: _iconButton(
-            _showFichario ? Icons.menu_book : Icons.menu_book_outlined,
-            'Fichário — solte uma pilha ou arquivos aqui para arquivar',
-            () => setState(() => _showFichario = !_showFichario),
-            active: _showFichario || hot,
+          child: AnimatedScale(
+            scale: (DragWatch.active.value || hot) ? 1.18 : 1,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.elasticOut,
+            child: _iconButton(
+              _showFichario ? Icons.menu_book : Icons.menu_book_outlined,
+              'Fichário — solte uma pilha ou arquivos aqui para arquivar',
+              () => setState(() => _showFichario = !_showFichario),
+              active: _showFichario || hot || DragWatch.active.value,
+            ),
           ),
         );
       },
     );
-  }
-
-  void _cycleView() {
-    const order = ['timeline', 'grid', 'list'];
-    final next = order[(order.indexOf(Prefs.i.viewMode.value) + 1) % order.length];
-    Prefs.i.setViewMode(next);
-  }
-
-  IconData _viewIcon(String mode) {
-    switch (mode) {
-      case 'grid':
-        return Icons.grid_view_rounded;
-      case 'list':
-        return Icons.view_list_rounded;
-      default:
-        return Icons.calendar_view_day_rounded;
-    }
-  }
-
-  String _viewLabel(String mode) {
-    switch (mode) {
-      case 'grid':
-        return 'grade';
-      case 'list':
-        return 'lista';
-      default:
-        return 'linha do tempo';
-    }
   }
 
   Widget _searchField(ColorScheme scheme) {
