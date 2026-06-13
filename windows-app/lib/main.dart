@@ -3,43 +3,40 @@ import 'dart:io';
 
 import 'package:auto_updater/auto_updater.dart';
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
+import 'package:flutter/services.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
-/// Feed de atualização do Windows. Fica num release de tag fixa
-/// ("windows"), com URL estável — independente de qual release é a
-/// "latest" do GitHub (o canal do Mac usa /releases/latest e não pode
-/// ser afetado pelas releases do Windows).
+import 'downloads_view.dart';
+import 'hot_corner.dart';
+
+/// Feed de atualização do Windows (tag fixa "windows", URL estável).
 const String kFeedURL =
     'https://github.com/v1r8/downside/releases/download/windows/appcast-win.xml';
-
 const String kTrayIcon = 'assets/tray.ico';
+
+final PanelController panel = PanelController();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
 
   const options = WindowOptions(
-    size: Size(460, 340),
-    center: true,
+    size: Size(560, 420),
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    titleBarStyle: TitleBarStyle.hidden,
     backgroundColor: Colors.transparent,
-    skipTaskbar: false,
-    titleBarStyle: TitleBarStyle.normal,
-    title: 'Downside',
   );
   await windowManager.waitUntilReadyToShow(options, () async {
-    await windowManager.show();
-    await windowManager.focus();
+    await windowManager.setAsFrameless();
+    await windowManager.setAlwaysOnTop(true);
+    await windowManager.setSkipTaskbar(true);
+    // Começa escondido: abre pelo canto da tela ou pela bandeja.
+    await windowManager.hide();
   });
-  // Fechar a janela esconde na bandeja (comportamento de app de bandeja),
-  // em vez de encerrar o app. Sair de verdade só pelo menu da bandeja.
-  await windowManager.setPreventClose(true);
 
-  // Auto-update (WinSparkle). Defensivo: nunca pode derrubar o app se
-  // o feed ainda não existir ou a verificação falhar.
   unawaited(_setupUpdater());
-
   runApp(const DownsideApp());
 }
 
@@ -48,8 +45,52 @@ Future<void> _setupUpdater() async {
     await autoUpdater.setFeedURL(kFeedURL);
     await autoUpdater.setScheduledCheckInterval(3600);
     await autoUpdater.checkForUpdates();
-  } catch (_) {
-    // Sem rede / feed ausente: silencioso no M0.
+  } catch (_) {}
+}
+
+/// Controla a janela em modo painel: posiciona no canto, mostra/esconde,
+/// com período de carência para o "fechar ao clicar fora".
+class PanelController {
+  bool visible = false;
+  bool pinned = false;
+  DateTime _shownAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Future<void> showAt(HotCorner corner) async {
+    await windowManager.setAlignment(_alignmentFor(corner));
+    await windowManager.show();
+    await windowManager.focus();
+    visible = true;
+    _shownAt = DateTime.now();
+  }
+
+  Future<void> hide() async {
+    if (!visible) return;
+    visible = false;
+    await windowManager.hide();
+  }
+
+  /// Clique fora (perda de foco) fecha — respeitando o pin e uma
+  /// carência de 400 ms após abrir (evita fechar no próprio show).
+  void handleBlur() {
+    if (!visible || pinned) return;
+    if (DateTime.now().difference(_shownAt) <
+        const Duration(milliseconds: 400)) {
+      return;
+    }
+    hide();
+  }
+
+  Alignment _alignmentFor(HotCorner c) {
+    switch (c) {
+      case HotCorner.topLeft:
+        return Alignment.topLeft;
+      case HotCorner.topRight:
+        return Alignment.topRight;
+      case HotCorner.bottomLeft:
+        return Alignment.bottomLeft;
+      case HotCorner.bottomRight:
+        return Alignment.bottomRight;
+    }
   }
 }
 
@@ -68,20 +109,22 @@ class DownsideApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
       ),
-      home: const HomePage(),
+      home: const PanelScaffold(),
     );
   }
 }
 
-class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+class PanelScaffold extends StatefulWidget {
+  const PanelScaffold({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  State<PanelScaffold> createState() => _PanelScaffoldState();
 }
 
-class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
-  String _version = '…';
+class _PanelScaffoldState extends State<PanelScaffold>
+    with TrayListener, WindowListener {
+  late final HotCornerService _hotCorner;
+  final FocusNode _focusNode = FocusNode();
 
   @override
   void initState() {
@@ -89,23 +132,17 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
     trayManager.addListener(this);
     windowManager.addListener(this);
     _initTray();
-    _loadVersion();
+    _hotCorner = HotCornerService(onTrigger: (corner) => panel.showAt(corner));
+    _hotCorner.start();
   }
 
   @override
   void dispose() {
+    _hotCorner.stop();
     trayManager.removeListener(this);
     windowManager.removeListener(this);
+    _focusNode.dispose();
     super.dispose();
-  }
-
-  Future<void> _loadVersion() async {
-    try {
-      final info = await PackageInfo.fromPlatform();
-      if (mounted) setState(() => _version = '${info.version} (${info.buildNumber})');
-    } catch (_) {
-      if (mounted) setState(() => _version = '?');
-    }
   }
 
   Future<void> _initTray() async {
@@ -122,34 +159,23 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
           ],
         ),
       );
-    } catch (_) {
-      // Sem ícone: o app ainda abre a janela.
-    }
+    } catch (_) {}
   }
 
   @override
-  void onWindowClose() {
-    // Esconde em vez de encerrar (setPreventClose está ativo).
-    windowManager.hide();
-  }
+  void onWindowBlur() => panel.handleBlur();
 
   @override
-  void onTrayIconMouseDown() {
-    windowManager.show();
-    windowManager.focus();
-  }
+  void onTrayIconMouseDown() => panel.showAt(HotCorner.bottomRight);
 
   @override
-  void onTrayIconRightMouseDown() {
-    trayManager.popUpContextMenu();
-  }
+  void onTrayIconRightMouseDown() => trayManager.popUpContextMenu();
 
   @override
   void onTrayMenuItemClick(MenuItem menuItem) {
     switch (menuItem.key) {
       case 'show':
-        windowManager.show();
-        windowManager.focus();
+        panel.showAt(HotCorner.bottomRight);
         break;
       case 'check_updates':
         unawaited(autoUpdater.checkForUpdates());
@@ -164,36 +190,60 @@ class _HomePageState extends State<HomePage> with TrayListener, WindowListener {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [scheme.surface, scheme.surfaceContainerHighest],
+      backgroundColor: Colors.transparent,
+      body: Focus(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.escape) {
+            panel.hide();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
           ),
-        ),
-        child: Center(
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.download_for_offline_outlined,
-                  size: 56, color: scheme.primary),
-              const SizedBox(height: 12),
-              const Text('Downside para Windows',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 4),
-              Text('versão $_version',
-                  style: TextStyle(color: scheme.onSurfaceVariant)),
-              const SizedBox(height: 4),
-              Text('M0 — base + auto-update',
-                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
-              const SizedBox(height: 20),
-              FilledButton.tonal(
-                onPressed: () => unawaited(autoUpdater.checkForUpdates()),
-                child: const Text('Verificar atualizações'),
-              ),
+              _header(scheme),
+              const Divider(height: 1),
+              const Expanded(child: DownloadsView()),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _header(ColorScheme scheme) {
+    return DragToMoveArea(
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
+            Icon(Icons.download_outlined, size: 18, color: scheme.primary),
+            const SizedBox(width: 8),
+            const Text('Downloads',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            const Spacer(),
+            IconButton(
+              tooltip: panel.pinned ? 'Liberar' : 'Fixar',
+              iconSize: 16,
+              onPressed: () => setState(() => panel.pinned = !panel.pinned),
+              icon: Icon(panel.pinned ? Icons.push_pin : Icons.push_pin_outlined),
+            ),
+            IconButton(
+              tooltip: 'Fechar',
+              iconSize: 16,
+              onPressed: () => panel.hide(),
+              icon: const Icon(Icons.close),
+            ),
+          ],
         ),
       ),
     );
