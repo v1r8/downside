@@ -16,6 +16,7 @@ import 'fichario.dart';
 import 'fichario_view.dart';
 import 'hot_corner.dart';
 import 'prefs.dart';
+import 'preview.dart';
 import 'settings_screen.dart';
 import 'single_instance.dart';
 import 'stacks.dart';
@@ -252,6 +253,7 @@ class _PanelScaffoldState extends State<PanelScaffold>
 
   void _onShow() {
     _searchCtrl.clear();
+    PreviewController.i.dismiss();
     setState(() => _query = '');
     _anim.forward(from: 0);
   }
@@ -313,7 +315,10 @@ class _PanelScaffoldState extends State<PanelScaffold>
   }
 
   @override
-  void onWindowBlur() => panel.handleBlur();
+  void onWindowBlur() {
+    PreviewController.i.dismiss();
+    panel.handleBlur();
+  }
 
   @override
   void onTrayIconMouseDown() => panel.showAt(_defaultTrigger());
@@ -381,17 +386,23 @@ class _PanelScaffoldState extends State<PanelScaffold>
                   ),
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: Column(
+                child: Stack(
                   children: [
-                    _header(scheme),
-                    Divider(
-                        height: 1, color: Colors.white.withValues(alpha: 0.06)),
-                    const StacksBar(),
-                    Expanded(
-                      child: _showFichario
-                          ? const FicharioView()
-                          : DownloadsView(query: _query),
+                    Column(
+                      children: [
+                        _header(scheme),
+                        Divider(
+                            height: 1,
+                            color: Colors.white.withValues(alpha: 0.06)),
+                        const StacksBar(),
+                        Expanded(
+                          child: _showFichario
+                              ? const FicharioView()
+                              : DownloadsView(query: _query),
+                        ),
+                      ],
                     ),
+                    const PreviewLayer(),
                   ],
                 ),
               ),

@@ -48,6 +48,10 @@ class Prefs {
   /// Chave da API do Claude (opcional, para títulos por IA).
   final claudeKey = ValueNotifier<String>('');
 
+  /// Preview ao pairar (hover).
+  final hoverEnabled = ValueNotifier<bool>(true);
+  final hoverDelay = ValueNotifier<int>(600); // ms
+
   Future<void> load() async {
     _sp = await SharedPreferences.getInstance();
     final f = _sp.getString('folder');
@@ -66,6 +70,18 @@ class Prefs {
         : 'timeline';
     clipboardEnabled.value = _sp.getBool('clipboardEnabled') ?? false;
     claudeKey.value = _sp.getString('claudeKey') ?? '';
+    hoverEnabled.value = _sp.getBool('hoverEnabled') ?? true;
+    hoverDelay.value = _sp.getInt('hoverDelay') ?? 600;
+  }
+
+  void setHoverEnabled(bool v) {
+    hoverEnabled.value = v;
+    _sp.setBool('hoverEnabled', v);
+  }
+
+  void setHoverDelay(int ms) {
+    hoverDelay.value = ms;
+    _sp.setInt('hoverDelay', ms);
   }
 
   void setClaudeKey(String value) {

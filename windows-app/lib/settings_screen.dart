@@ -147,6 +147,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 8),
+          _sectionTitle('Preview ao pairar'),
+          ValueListenableBuilder<bool>(
+            valueListenable: Prefs.i.hoverEnabled,
+            builder: (_, on, __) => Column(
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Mostrar preview ao pairar o mouse'),
+                  value: on,
+                  onChanged: Prefs.i.setHoverEnabled,
+                ),
+                if (on)
+                  ValueListenableBuilder<int>(
+                    valueListenable: Prefs.i.hoverDelay,
+                    builder: (_, ms, __) => Row(
+                      children: [
+                        const Text('Atraso', style: TextStyle(fontSize: 12)),
+                        Expanded(
+                          child: Slider(
+                            min: 200,
+                            max: 2000,
+                            divisions: 18,
+                            value: ms.toDouble(),
+                            label: '${(ms / 1000).toStringAsFixed(1)} s',
+                            onChanged: (v) =>
+                                Prefs.i.setHoverDelay(v.round()),
+                          ),
+                        ),
+                        Text('${(ms / 1000).toStringAsFixed(1)} s',
+                            style: TextStyle(
+                                fontSize: 11, color: scheme.onSurfaceVariant)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
           _sectionTitle('Clipboard'),
           ValueListenableBuilder<bool>(
             valueListenable: Prefs.i.clipboardEnabled,

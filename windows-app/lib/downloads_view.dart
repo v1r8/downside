@@ -10,6 +10,7 @@ import 'package:watcher/watcher.dart';
 
 import 'clipboard.dart';
 import 'prefs.dart';
+import 'preview.dart';
 import 'search.dart';
 import 'win_shell.dart';
 
@@ -414,13 +415,21 @@ class _DownloadsViewState extends State<DownloadsView> {
   }
 
   Widget _interactive(List<_Entry> items, int index, _Entry e, Widget child) {
-    return _draggable(
-      e,
-      GestureDetector(
-        onTapDown: (_) => _tap(items, index),
-        onDoubleTap: () => _open(_targets(e)),
-        onSecondaryTapDown: (d) => _contextMenu(items, index, d.globalPosition),
-        child: child,
+    return MouseRegion(
+      onEnter: (ev) => PreviewController.i.hover(e.path, ev.position),
+      onExit: (_) => PreviewController.i.unhover(e.path),
+      child: _draggable(
+        e,
+        GestureDetector(
+          onTapDown: (_) {
+            PreviewController.i.dismiss();
+            _tap(items, index);
+          },
+          onDoubleTap: () => _open(_targets(e)),
+          onSecondaryTapDown: (d) =>
+              _contextMenu(items, index, d.globalPosition),
+          child: child,
+        ),
       ),
     );
   }
