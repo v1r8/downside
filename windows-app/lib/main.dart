@@ -23,7 +23,7 @@ final PanelController panel = PanelController();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Instância única: se já há um Downside aberto, encerra este.
-  if (anotherInstanceRunning()) {
+  if (await anotherInstanceRunning()) {
     exit(0);
   }
   await windowManager.ensureInitialized();

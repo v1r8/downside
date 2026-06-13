@@ -1,13 +1,18 @@
-import 'dart:ffi';
+import 'dart:io';
 
-import 'package:ffi/ffi.dart';
-import 'package:win32/win32.dart';
+/// Instância única sem dependências nativas: a primeira instância
+/// reserva uma porta de loopback; se a reserva falhar, já há outro
+/// Downside rodando e o chamador deve encerrar este processo.
+///
+/// O socket é mantido aberto durante toda a execução (não fechar).
+ServerSocket? _instanceLock;
 
-/// Instância única: cria um mutex nomeado. Se já existir, há outro
-/// Downside rodando — o chamador deve encerrar este processo.
-bool anotherInstanceRunning() {
-  final name = 'Downside_SingleInstance_Mutex_v1'.toNativeUtf16();
-  // Mantém o mutex vivo durante toda a execução (não liberar).
-  CreateMutexW(nullptr, 1, name);
-  return GetLastError() == ERROR_ALREADY_EXISTS;
+Future<bool> anotherInstanceRunning() async {
+  try {
+    _instanceLock =
+        await ServerSocket.bind(InternetAddress.loopbackIPv4, 47615);
+    return false;
+  } catch (_) {
+    return true;
+  }
 }
