@@ -8,6 +8,6 @@ import 'package:win32/win32.dart';
 bool anotherInstanceRunning() {
   final name = 'Downside_SingleInstance_Mutex_v1'.toNativeUtf16();
   // Mantém o mutex vivo durante toda a execução (não liberar).
-  CreateMutex(nullptr, 1, name);
+  CreateMutexW(nullptr, 1, name);
   return GetLastError() == ERROR_ALREADY_EXISTS;
 }
