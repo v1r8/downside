@@ -36,6 +36,12 @@ jobs:
       - name: Gerar plataforma Windows
         run: flutter create --platforms=windows --org com.v1r8 --project-name downside .
 
+      - name: Painel sem moldura (WS_POPUP)
+        run: |
+          $f = 'windows/runner/win32_window.cpp'
+          (Get-Content $f -Raw).Replace('WS_OVERLAPPEDWINDOW', 'WS_POPUP') |
+            Set-Content $f -NoNewline
+
       - name: Definir versão no pubspec
         run: |
           $v = "${{ steps.ver.outputs.version }}"

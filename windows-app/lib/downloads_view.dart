@@ -358,7 +358,7 @@ class _DownloadsViewState extends State<DownloadsView> {
     return _draggable(
       e,
       GestureDetector(
-        onTap: () => _tap(items, index),
+        onTapDown: (_) => _tap(items, index),
         onDoubleTap: () => _open(_targets(e)),
         onSecondaryTapDown: (d) => _contextMenu(items, index, d.globalPosition),
         child: child,

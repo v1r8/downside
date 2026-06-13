@@ -12,6 +12,7 @@ import 'downloads_view.dart';
 import 'hot_corner.dart';
 import 'prefs.dart';
 import 'settings_screen.dart';
+import 'single_instance.dart';
 
 const String kFeedURL =
     'https://github.com/v1r8/downside/releases/download/windows/appcast-win.xml';
@@ -21,6 +22,10 @@ final PanelController panel = PanelController();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Instância única: se já há um Downside aberto, encerra este.
+  if (anotherInstanceRunning()) {
+    exit(0);
+  }
   await windowManager.ensureInitialized();
   await Window.initialize();
   await Prefs.i.load();
