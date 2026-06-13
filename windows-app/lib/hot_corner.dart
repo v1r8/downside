@@ -11,12 +11,12 @@ enum HotCorner { topLeft, topRight, bottomLeft, bottomRight }
 /// (sem hook elevado / UAC), com tempo de permanência (dwell) e
 /// rearme só depois que o mouse sai do canto.
 class HotCornerService {
-  HotCornerService({required this.onTrigger});
+  HotCornerService({required this.onTrigger, required this.enabledCorner});
 
   final void Function(HotCorner corner) onTrigger;
 
-  /// Canto ativo (por enquanto fixo; vira configurável no M1c).
-  HotCorner enabled = HotCorner.bottomRight;
+  /// Canto ativo, lido das preferências a cada verificação.
+  final HotCorner Function() enabledCorner;
 
   Timer? _timer;
   HotCorner? _dwellCorner;
@@ -63,7 +63,7 @@ class HotCornerService {
     }
 
     // Só o canto habilitado conta.
-    final active = inCorner == enabled ? inCorner : null;
+    final active = inCorner == enabledCorner() ? inCorner : null;
 
     if (active != null) {
       if (!_armed) return;

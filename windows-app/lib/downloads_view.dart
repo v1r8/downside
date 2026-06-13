@@ -6,13 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:watcher/watcher.dart';
 
-/// Pasta de Downloads do usuário (configurável a partir do M1c).
-String downloadsPath() {
-  final home = Platform.environment['USERPROFILE'] ??
-      Platform.environment['HOMEPATH'] ??
-      '';
-  return p.join(home, 'Downloads');
-}
+import 'prefs.dart';
 
 class _Entry {
   _Entry(this.path, this.name, this.isDir, this.modified, this.size);
@@ -26,7 +20,9 @@ class _Entry {
 /// Grade da pasta de Downloads: lista os arquivos (mais recentes
 /// primeiro), abre no duplo-clique e acompanha mudanças da pasta.
 class DownloadsView extends StatefulWidget {
-  const DownloadsView({super.key});
+  const DownloadsView({super.key, this.query = ''});
+
+  final String query;
 
   @override
   State<DownloadsView> createState() => _DownloadsViewState();
@@ -43,18 +39,26 @@ class _DownloadsViewState extends State<DownloadsView> {
     super.initState();
     _load();
     _startWatching();
+    Prefs.i.folder.addListener(_onFolderChanged);
   }
 
   @override
   void dispose() {
+    Prefs.i.folder.removeListener(_onFolderChanged);
     _watchSub?.cancel();
     _debounce?.cancel();
     super.dispose();
   }
 
+  void _onFolderChanged() {
+    _watchSub?.cancel();
+    _startWatching();
+    _load();
+  }
+
   void _startWatching() {
     try {
-      final watcher = DirectoryWatcher(downloadsPath());
+      final watcher = DirectoryWatcher(Prefs.i.folder.value);
       _watchSub = watcher.events.listen((_) {
         _debounce?.cancel();
         _debounce = Timer(const Duration(milliseconds: 300), _load);
@@ -67,8 +71,14 @@ class _DownloadsViewState extends State<DownloadsView> {
   /// Recarrega de fora (ex.: cada vez que o painel é aberto).
   void reload() => _load();
 
+  List<_Entry> get _visible {
+    final q = widget.query.trim().toLowerCase();
+    if (q.isEmpty) return _entries;
+    return _entries.where((e) => e.name.toLowerCase().contains(q)).toList();
+  }
+
   void _load() {
-    final dir = Directory(downloadsPath());
+    final dir = Directory(Prefs.i.folder.value);
     final list = <_Entry>[];
     try {
       for (final e in dir.listSync(followLinks: false)) {
@@ -101,14 +111,17 @@ class _DownloadsViewState extends State<DownloadsView> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    if (_entries.isEmpty) {
+    final items = _visible;
+    if (items.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.inbox_outlined, size: 36, color: scheme.onSurfaceVariant),
             const SizedBox(height: 8),
-            Text('Pasta de Downloads vazia',
+            Text(widget.query.trim().isEmpty
+                ? 'Pasta vazia'
+                : 'Nada encontrado',
                 style: TextStyle(color: scheme.onSurfaceVariant)),
           ],
         ),
@@ -122,9 +135,9 @@ class _DownloadsViewState extends State<DownloadsView> {
         crossAxisSpacing: 6,
         childAspectRatio: 0.82,
       ),
-      itemCount: _entries.length,
+      itemCount: items.length,
       itemBuilder: (context, i) {
-        final e = _entries[i];
+        final e = items[i];
         final selected = _selected == e.path;
         return GestureDetector(
           onTap: () => setState(() => _selected = e.path),
