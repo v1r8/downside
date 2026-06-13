@@ -33,6 +33,12 @@ Future<void> main() async {
     backgroundColor: Colors.transparent,
   );
   await windowManager.waitUntilReadyToShow(options, () async {
+    // Esconde os botões nativos (minimizar/maximizar/fechar) e remove
+    // a moldura — é um painel, não uma janela comum.
+    await windowManager.setTitleBarStyle(
+      TitleBarStyle.hidden,
+      windowButtonVisibility: false,
+    );
     await windowManager.setAsFrameless();
     await windowManager.setAlwaysOnTop(true);
     await windowManager.setSkipTaskbar(true);
@@ -290,19 +296,26 @@ class _PanelScaffoldState extends State<PanelScaffold>
 
   Widget _header(ColorScheme scheme) {
     return Container(
-      height: 48,
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+      height: 50,
+      padding: const EdgeInsets.fromLTRB(12, 8, 10, 6),
       child: Row(
         children: [
           DragToMoveArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
+              padding: const EdgeInsets.only(right: 8),
               child: Icon(Icons.download_rounded, size: 20, color: scheme.primary),
             ),
           ),
-          const SizedBox(width: 4),
           Expanded(child: _searchField(scheme)),
-          const SizedBox(width: 4),
+          const SizedBox(width: 8),
+          ValueListenableBuilder<String>(
+            valueListenable: Prefs.i.viewMode,
+            builder: (_, mode, __) => _iconButton(
+              _viewIcon(mode),
+              'Visualização: ${_viewLabel(mode)}',
+              _cycleView,
+            ),
+          ),
           _iconButton(
             panel.pinned ? Icons.push_pin : Icons.push_pin_outlined,
             panel.pinned ? 'Liberar' : 'Fixar',
@@ -313,6 +326,34 @@ class _PanelScaffoldState extends State<PanelScaffold>
         ],
       ),
     );
+  }
+
+  void _cycleView() {
+    const order = ['timeline', 'grid', 'list'];
+    final next = order[(order.indexOf(Prefs.i.viewMode.value) + 1) % order.length];
+    Prefs.i.setViewMode(next);
+  }
+
+  IconData _viewIcon(String mode) {
+    switch (mode) {
+      case 'grid':
+        return Icons.grid_view_rounded;
+      case 'list':
+        return Icons.view_list_rounded;
+      default:
+        return Icons.calendar_view_day_rounded;
+    }
+  }
+
+  String _viewLabel(String mode) {
+    switch (mode) {
+      case 'grid':
+        return 'grade';
+      case 'list':
+        return 'lista';
+      default:
+        return 'linha do tempo';
+    }
   }
 
   Widget _searchField(ColorScheme scheme) {

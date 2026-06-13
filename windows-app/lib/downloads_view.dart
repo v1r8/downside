@@ -17,8 +17,9 @@ class _Entry {
   final int size;
 }
 
-/// Grade da pasta de Downloads: lista os arquivos (mais recentes
-/// primeiro), abre no duplo-clique e acompanha mudanças da pasta.
+/// Conteúdo da pasta monitorada, em três modos: linha do tempo
+/// (padrão, agrupada por data), grade e lista. Abre no duplo-clique e
+/// acompanha mudanças da pasta.
 class DownloadsView extends StatefulWidget {
   const DownloadsView({super.key, this.query = ''});
 
@@ -40,11 +41,13 @@ class _DownloadsViewState extends State<DownloadsView> {
     _load();
     _startWatching();
     Prefs.i.folder.addListener(_onFolderChanged);
+    Prefs.i.viewMode.addListener(_onViewChanged);
   }
 
   @override
   void dispose() {
     Prefs.i.folder.removeListener(_onFolderChanged);
+    Prefs.i.viewMode.removeListener(_onViewChanged);
     _watchSub?.cancel();
     _debounce?.cancel();
     super.dispose();
@@ -56,6 +59,8 @@ class _DownloadsViewState extends State<DownloadsView> {
     _load();
   }
 
+  void _onViewChanged() => setState(() {});
+
   void _startWatching() {
     try {
       final watcher = DirectoryWatcher(Prefs.i.folder.value);
@@ -63,13 +68,8 @@ class _DownloadsViewState extends State<DownloadsView> {
         _debounce?.cancel();
         _debounce = Timer(const Duration(milliseconds: 300), _load);
       });
-    } catch (_) {
-      // Sem watcher: a lista ainda recarrega ao reabrir o painel.
-    }
+    } catch (_) {}
   }
-
-  /// Recarrega de fora (ex.: cada vez que o painel é aberto).
-  void reload() => _load();
 
   List<_Entry> get _visible {
     final q = widget.query.trim().toLowerCase();
@@ -97,9 +97,7 @@ class _DownloadsViewState extends State<DownloadsView> {
       }
     } catch (_) {}
     list.sort((a, b) => b.modified.compareTo(a.modified));
-    if (mounted) {
-      setState(() => _entries = list.take(300).toList());
-    }
+    if (mounted) setState(() => _entries = list.take(300).toList());
   }
 
   Future<void> _open(_Entry e) async {
@@ -119,16 +117,27 @@ class _DownloadsViewState extends State<DownloadsView> {
           children: [
             Icon(Icons.inbox_outlined, size: 36, color: scheme.onSurfaceVariant),
             const SizedBox(height: 8),
-            Text(widget.query.trim().isEmpty
-                ? 'Pasta vazia'
-                : 'Nada encontrado',
+            Text(widget.query.trim().isEmpty ? 'Pasta vazia' : 'Nada encontrado',
                 style: TextStyle(color: scheme.onSurfaceVariant)),
           ],
         ),
       );
     }
+    switch (Prefs.i.viewMode.value) {
+      case 'grid':
+        return _grid(items, scheme);
+      case 'list':
+        return _list(items, scheme);
+      default:
+        return _timeline(items, scheme);
+    }
+  }
+
+  // MARK: grade
+
+  Widget _grid(List<_Entry> items, ColorScheme scheme) {
     return GridView.builder(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 14),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 112,
         mainAxisSpacing: 6,
@@ -155,13 +164,11 @@ class _DownloadsViewState extends State<DownloadsView> {
                 Icon(_iconFor(e), size: 40, color: _colorFor(e, scheme)),
                 const SizedBox(height: 6),
                 Expanded(
-                  child: Text(
-                    e.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 11),
-                  ),
+                  child: Text(e.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 11)),
                 ),
               ],
             ),
@@ -169,6 +176,126 @@ class _DownloadsViewState extends State<DownloadsView> {
         );
       },
     );
+  }
+
+  // MARK: lista (plana) e linha do tempo (agrupada por data)
+
+  Widget _list(List<_Entry> items, ColorScheme scheme) {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+      itemCount: items.length,
+      itemBuilder: (context, i) => _row(items[i], scheme),
+    );
+  }
+
+  Widget _timeline(List<_Entry> items, ColorScheme scheme) {
+    // Lista achatada: cabeçalhos (String) + itens (_Entry), na ordem.
+    final rows = <Object>[];
+    String? current;
+    for (final e in items) {
+      final b = _bucket(e.modified);
+      if (b != current) {
+        current = b;
+        rows.add(b);
+      }
+      rows.add(e);
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(8, 2, 8, 12),
+      itemCount: rows.length,
+      itemBuilder: (context, i) {
+        final r = rows[i];
+        if (r is String) {
+          return Padding(
+            padding: EdgeInsets.only(left: 8, right: 8, top: i == 0 ? 6 : 16, bottom: 6),
+            child: Text(r,
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurfaceVariant)),
+          );
+        }
+        return _row(r as _Entry, scheme);
+      },
+    );
+  }
+
+  Widget _row(_Entry e, ColorScheme scheme) {
+    final selected = _selected == e.path;
+    return GestureDetector(
+      onTap: () => setState(() => _selected = e.path),
+      onDoubleTap: () => _open(e),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? scheme.primary.withValues(alpha: 0.22)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(_iconFor(e), size: 26, color: _colorFor(e, scheme)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(e.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12.5)),
+                  Text(_meta(e),
+                      style: TextStyle(
+                          fontSize: 10.5, color: scheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // MARK: helpers
+
+  String _bucket(DateTime d) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dd = DateTime(d.year, d.month, d.day);
+    final diff = today.difference(dd).inDays;
+    if (diff <= 0) return 'Hoje';
+    if (diff == 1) return 'Ontem';
+    if (diff < 7) return 'Esta semana';
+    if (d.year == now.year && d.month == now.month) return 'Este mês';
+    return 'Anteriores';
+  }
+
+  String _meta(_Entry e) {
+    final size = e.isDir ? 'Pasta' : _humanSize(e.size);
+    return '$size · ${_relative(e.modified)}';
+  }
+
+  String _relative(DateTime d) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dd = DateTime(d.year, d.month, d.day);
+    final diff = today.difference(dd).inDays;
+    final hh = d.hour.toString().padLeft(2, '0');
+    final mm = d.minute.toString().padLeft(2, '0');
+    if (diff <= 0) return '$hh:$mm';
+    if (diff == 1) return 'ontem';
+    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+
+  String _humanSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
   IconData _iconFor(_Entry e) {

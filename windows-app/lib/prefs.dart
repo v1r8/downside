@@ -25,6 +25,9 @@ class Prefs {
   final corner = ValueNotifier<HotCorner>(HotCorner.bottomRight);
   final accent = ValueNotifier<Color>(const Color(0xFF2E7DF6));
 
+  /// 'timeline' | 'grid' | 'list' — padrão linha do tempo (como no Mac).
+  final viewMode = ValueNotifier<String>('timeline');
+
   Future<void> load() async {
     _sp = await SharedPreferences.getInstance();
     final f = _sp.getString('folder');
@@ -35,6 +38,15 @@ class Prefs {
         : HotCorner.bottomRight;
     final a = _sp.getInt('accent');
     accent.value = a != null ? Color(a) : const Color(0xFF2E7DF6);
+    final v = _sp.getString('viewMode');
+    viewMode.value = (v == 'grid' || v == 'list' || v == 'timeline')
+        ? v!
+        : 'timeline';
+  }
+
+  void setViewMode(String value) {
+    viewMode.value = value;
+    _sp.setString('viewMode', value);
   }
 
   void setFolder(String value) {
