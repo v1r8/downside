@@ -18,6 +18,7 @@ dependencies:
   url_launcher: ^6.3.0
   watcher: ^1.1.0
   path: ^1.9.0
+  archive: ^3.6.1
   flutter_acrylic: ^1.1.4
   shared_preferences: ^2.3.2
   file_selector: ^1.0.3

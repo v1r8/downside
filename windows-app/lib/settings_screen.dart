@@ -1,9 +1,11 @@
-import 'package:auto_updater/auto_updater.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import 'ai.dart';
 import 'clipboard.dart';
+import 'main.dart' show panel;
 import 'prefs.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -241,11 +243,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          _sectionTitle('IA (títulos das pilhas)'),
+          _sectionTitle('IA local (Ollama)'),
           Text(
-            'Os títulos do fichário são gerados localmente pelo Ollama '
-            '(grátis) ou, se preferir, pela API do Claude. Sem nenhum dos '
-            'dois, fica o título por data.',
+            'A IA local roda no seu computador (grátis e privada) e cuida de '
+            'nomear pilhas, renomear documentos e os títulos do fichário. '
+            'Precisa do Ollama instalado e de um modelo baixado.',
+            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 8),
+          const _OllamaSection(),
+          const SizedBox(height: 12),
+          _sectionTitle('IA na nuvem (Claude — opcional)'),
+          Text(
+            'Se não quiser usar a IA local, uma chave do Claude faz o mesmo '
+            'trabalho pela internet. Sem Ollama nem chave, ficam os nomes por '
+            'data.',
             style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
@@ -268,7 +280,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('Verificar atualizações'),
             subtitle: Text('versão $_version'),
             trailing: FilledButton.tonal(
-              onPressed: () => autoUpdater.checkForUpdates(),
+              onPressed: () => panel.beginUpdateCheck(),
               child: const Text('Verificar'),
             ),
           ),
@@ -294,5 +306,228 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (dir != null && dir.isNotEmpty) {
       Prefs.i.setFolder(dir);
     }
+  }
+}
+
+/// Painel da IA local: status do Ollama, modelos baixados (escolher o
+/// ativo), e baixar um novo modelo com barra de progresso.
+class _OllamaSection extends StatefulWidget {
+  const _OllamaSection();
+
+  @override
+  State<_OllamaSection> createState() => _OllamaSectionState();
+}
+
+class _OllamaSectionState extends State<_OllamaSection> {
+  bool _checking = true;
+  bool _running = false;
+  List<String> _models = [];
+
+  final _pullCtrl = TextEditingController(text: 'llama3.2:3b');
+  bool _pulling = false;
+  double _pullProgress = 0;
+  String _pullStatus = '';
+
+  // Modelos pequenos e bons para nomear documentos.
+  static const _suggested = ['llama3.2:3b', 'qwen2.5:3b', 'gemma2:2b'];
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    _pullCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _checking = true);
+    final running = await OllamaService.isRunning();
+    final models = running ? await OllamaService.listModels() : <String>[];
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      _running = running;
+      _models = models;
+    });
+  }
+
+  Future<void> _pull(String name) async {
+    if (_pulling || name.trim().isEmpty) return;
+    setState(() {
+      _pulling = true;
+      _pullProgress = 0;
+      _pullStatus = 'Conectando…';
+    });
+    final ok = await OllamaService.pullModel(
+      name.trim(),
+      onProgress: (status, prog) {
+        if (!mounted) return;
+        setState(() {
+          _pullStatus = status;
+          if (prog > 0) _pullProgress = prog;
+        });
+      },
+    );
+    if (!mounted) return;
+    setState(() {
+      _pulling = false;
+      _pullStatus = ok ? 'Baixado ✓' : 'Falhou — Ollama está rodando?';
+    });
+    if (ok) {
+      Prefs.i.setOllamaModel(name.trim());
+      await _refresh();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Status
+        Row(
+          children: [
+            if (_checking)
+              const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+            else
+              Icon(_running ? Icons.check_circle : Icons.cancel,
+                  size: 16,
+                  color: _running ? const Color(0xFF22C55E) : scheme.error),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _checking
+                    ? 'Verificando o Ollama…'
+                    : _running
+                        ? 'Ollama rodando — ${_models.length} modelo(s) baixado(s)'
+                        : 'Ollama não encontrado em 127.0.0.1:11434',
+                style: const TextStyle(fontSize: 12.5),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Recarregar',
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              onPressed: _checking ? null : _refresh,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        if (!_checking && !_running)
+          Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 4),
+            child: GestureDetector(
+              onTap: () =>
+                  launchUrl(Uri.parse('https://ollama.com/download')),
+              child: Text(
+                'Instalar o Ollama (ollama.com/download) e abri-lo.',
+                style: TextStyle(
+                    fontSize: 11.5,
+                    color: scheme.primary,
+                    decoration: TextDecoration.underline),
+              ),
+            ),
+          ),
+
+        // Modelos baixados — escolher o ativo
+        if (_running) ...[
+          const SizedBox(height: 8),
+          Text('Modelo usado para nomear:',
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+          const SizedBox(height: 4),
+          if (_models.isEmpty)
+            Text('Nenhum modelo baixado ainda — baixe um abaixo.',
+                style:
+                    TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant))
+          else
+            ValueListenableBuilder<String>(
+              valueListenable: Prefs.i.ollamaModel,
+              builder: (_, active, __) => Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final m in _models)
+                    ChoiceChip(
+                      label: Text(m, style: const TextStyle(fontSize: 11)),
+                      selected: active == m,
+                      onSelected: (_) => Prefs.i.setOllamaModel(m),
+                    ),
+                ],
+              ),
+            ),
+        ],
+
+        // Baixar modelo
+        const SizedBox(height: 12),
+        Text('Baixar um modelo:',
+            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final s in _suggested)
+              ActionChip(
+                label: Text(s, style: const TextStyle(fontSize: 11)),
+                onPressed: _pulling ? null : () => _pull(s),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _pullCtrl,
+                enabled: !_pulling,
+                style: const TextStyle(fontSize: 13),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  labelText: 'Nome do modelo (ex.: llama3.2:3b)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.tonal(
+              onPressed: _pulling ? null : () => _pull(_pullCtrl.text),
+              child: const Text('Baixar'),
+            ),
+          ],
+        ),
+        if (_pulling || _pullStatus.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_pulling)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: _pullProgress > 0 ? _pullProgress : null,
+                      minHeight: 6,
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                Text(
+                  _pulling && _pullProgress > 0
+                      ? '$_pullStatus — ${(_pullProgress * 100).round()}%'
+                      : _pullStatus,
+                  style:
+                      TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
   }
 }

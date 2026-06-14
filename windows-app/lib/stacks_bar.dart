@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:path/path.dart' as p;
 import 'package:super_drag_and_drop/super_drag_and_drop.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -25,8 +24,7 @@ class StacksBar extends StatefulWidget {
   State<StacksBar> createState() => _StacksBarState();
 }
 
-class _StacksBarState extends State<StacksBar>
-    with SingleTickerProviderStateMixin {
+class _StacksBarState extends State<StacksBar> {
   int? _expanded;
   int? _target; // chip sob o cursor durante o drop de arquivos
   bool _newTarget = false;
@@ -40,24 +38,9 @@ class _StacksBarState extends State<StacksBar>
   // de arquivos do sistema (DragWatch). Faz a lixeira aparecer.
   bool _stackDragging = false;
 
-  // Tipo do ultimo arrasto ativo — preservado durante a saida para que
-  // as zonas encolham (mola) em vez de sumirem (teletransporte).
-  bool _lastFileDrag = false;
-
-  // Largura natural do bloco de chips — medida apos o layout, para
-  // dimensionar as zonas que preenchem o restante da barra.
-  final GlobalKey _chipsKey = GlobalKey();
-  double _chipsW = 0;
-
-  late final AnimationController _reveal;
-
   @override
   void initState() {
     super.initState();
-    _reveal = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 460),
-    );
     StacksController.i.stacks.addListener(_onChange);
     StacksController.i.naming.addListener(_repaint);
     StacksController.i.renaming.addListener(_repaint);
@@ -70,7 +53,6 @@ class _StacksBarState extends State<StacksBar>
     StacksController.i.naming.removeListener(_repaint);
     StacksController.i.renaming.removeListener(_repaint);
     DragWatch.active.removeListener(_onChange);
-    _reveal.dispose();
     super.dispose();
   }
 
@@ -83,47 +65,19 @@ class _StacksBarState extends State<StacksBar>
         !StacksController.i.stacks.value.any((s) => s.id == _expanded)) {
       _expanded = null;
     }
-    _syncReveal();
     if (mounted) setState(() {});
   }
 
   bool get _anyDrag => DragWatch.active.value || _stackDragging;
-
-  /// Liga/desliga a animacao-mola das zonas conforme ha arrasto.
-  void _syncReveal() {
-    final anyDrag = _anyDrag;
-    if (anyDrag) {
-      _lastFileDrag = DragWatch.active.value;
-      if (_reveal.status != AnimationStatus.completed &&
-          _reveal.status != AnimationStatus.forward) {
-        _reveal.forward();
-      }
-    } else {
-      if (_reveal.status != AnimationStatus.dismissed &&
-          _reveal.status != AnimationStatus.reverse) {
-        _reveal.reverse();
-      }
-    }
-  }
-
-  void _measureChips() {
-    final ctx = _chipsKey.currentContext;
-    final w = ctx?.size?.width;
-    if (w != null && (w - _chipsW).abs() > 0.5) {
-      _chipsW = w;
-      if (mounted) setState(() {});
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final stacks = StacksController.i.stacks.value;
     final show = _anyDrag || stacks.isNotEmpty;
-    SchedulerBinding.instance.addPostFrameCallback((_) => _measureChips());
     return AnimatedSize(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
       alignment: Alignment.topCenter,
       child: !show
           ? const SizedBox(width: double.infinity)
@@ -132,13 +86,7 @@ class _StacksBarState extends State<StacksBar>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(
-                    width: double.infinity,
-                    child: AnimatedBuilder(
-                      animation: _reveal,
-                      builder: (context, _) => _bar(stacks, scheme),
-                    ),
-                  ),
+                  SizedBox(width: double.infinity, child: _bar(stacks, scheme)),
                   if (_expanded != null && !_anyDrag)
                     _detail(
                       stacks.firstWhere((s) => s.id == _expanded),
@@ -150,70 +98,35 @@ class _StacksBarState extends State<StacksBar>
     );
   }
 
-  /// A barra: lixeira (esquerda) | chips | nova pilha (direita). As zonas
-  /// crescem do zero ate dividir o espaco livre — preenche a barra toda.
+  /// A barra preenche toda a largura: em repouso, os chips se dividem o
+  /// espaço; durante o arrasto entram a lixeira (esquerda) e a "Nova
+  /// pilha" (direita). Tudo em Expanded — ocupa a barra inteira.
   Widget _bar(List<FileStack> stacks, ColorScheme scheme) {
-    final t = Curves.easeOutCubic.transform(_reveal.value);
-    final spring = Curves.elasticOut.transform(_reveal.value);
-    final visible = _reveal.value > 0.001;
+    final fileDrag = DragWatch.active.value;
+    final dragging = fileDrag || _stackDragging;
     final canAddNew = stacks.length < StacksController.maxStacks;
-
-    final showTrash = visible;
-    final showNew = visible && _lastFileDrag && canAddNew;
-    final zoneCount = (showTrash ? 1 : 0) + (showNew ? 1 : 0);
-
-    return LayoutBuilder(
-      builder: (context, c) {
-        final total = c.maxWidth.isFinite ? c.maxWidth : 0.0;
-        final free = (total - _chipsW).clamp(0.0, total);
-        final perZone = zoneCount > 0 ? (free / zoneCount) * t : 0.0;
-        return Row(
-          children: [
-            if (showTrash)
-              _zoneSlot(
-                width: perZone,
-                t: t,
-                spring: spring,
-                child: _trashZone(scheme),
-              ),
-            Flexible(
-              fit: FlexFit.loose,
-              child: Row(
-                key: _chipsKey,
-                mainAxisSize: MainAxisSize.min,
-                children: [for (final s in stacks) _chip(s, scheme)],
-              ),
-            ),
-            if (showNew)
-              _zoneSlot(
-                width: perZone,
-                t: t,
-                spring: spring,
-                child: _newStackZone(scheme),
-              ),
-          ],
-        );
-      },
+    final showNew = fileDrag && canAddNew;
+    return Row(
+      children: [
+        if (dragging) Expanded(child: _fastIn(_trashZone(scheme))),
+        for (final s in stacks) Expanded(child: _chip(s, scheme)),
+        if (showNew) Expanded(child: _fastIn(_newStackZone(scheme))),
+      ],
     );
   }
 
-  /// Caixa de uma zona de drop: largura animada (mola), conteudo
-  /// centralizado, recortado durante o crescimento (sem teletransporte).
-  Widget _zoneSlot({
-    required double width,
-    required double t,
-    required double spring,
-    required Widget child,
-  }) {
-    return SizedBox(
-      width: width,
-      child: ClipRect(
-        child: Opacity(
-          opacity: t.clamp(0.0, 1.0),
-          // Mola sutil — sem teletransporte (a largura ja cresce suave).
-          child: Transform.scale(scale: 0.85 + 0.15 * spring, child: child),
-        ),
+  /// Entrada rápida e responsiva das zonas (fade + leve escala) — sem
+  /// mola lenta nem "salto".
+  Widget _fastIn(Widget child) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 140),
+      curve: Curves.easeOut,
+      builder: (context, t, c) => Opacity(
+        opacity: t,
+        child: Transform.scale(scale: 0.94 + 0.06 * t, child: c),
       ),
+      child: child,
     );
   }
 
@@ -241,7 +154,7 @@ class _StacksBarState extends State<StacksBar>
         ),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisSize: dragging ? MainAxisSize.min : MainAxisSize.max,
         children: [
           _deck(s.paths, 22, scheme, holo: s.hadBulkAction),
           const SizedBox(width: 8),
@@ -252,14 +165,15 @@ class _StacksBarState extends State<StacksBar>
             if (naming)
               const MagicName(width: 54)
             else if (s.name != null)
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 110),
+              Flexible(
                 child: Text(s.name!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 11.5, color: scheme.onSurfaceVariant)),
-              ),
+              )
+            else
+              const Spacer(),
             const SizedBox(width: 2),
             Icon(active ? Icons.expand_less : Icons.expand_more,
                 size: 16, color: scheme.onSurfaceVariant),
@@ -294,10 +208,7 @@ class _StacksBarState extends State<StacksBar>
     return Draggable<int>(
       data: s.id,
       dragAnchorStrategy: pointerDragAnchorStrategy,
-      onDragStarted: () {
-        setState(() => _stackDragging = true);
-        _syncReveal();
-      },
+      onDragStarted: () => setState(() => _stackDragging = true),
       onDragEnd: (_) => _endStackDrag(),
       onDraggableCanceled: (_, __) => _endStackDrag(),
       onDragCompleted: _endStackDrag,
@@ -311,8 +222,7 @@ class _StacksBarState extends State<StacksBar>
   }
 
   void _endStackDrag() {
-    setState(() => _stackDragging = false);
-    _syncReveal();
+    if (mounted) setState(() => _stackDragging = false);
   }
 
   void _deleteStack(int id) {
@@ -349,22 +259,25 @@ class _StacksBarState extends State<StacksBar>
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeOut,
-              alignment: Alignment.center,
+              width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: hot ? red.withValues(alpha: 0.30) : Colors.transparent,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.delete_outline,
-                      size: 18, color: hot ? Colors.white : red),
-                  const SizedBox(width: 6),
-                  Text('Lixeira',
-                      style: TextStyle(
-                          fontSize: 12, color: hot ? Colors.white : red)),
-                ],
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.delete_outline,
+                        size: 18, color: hot ? Colors.white : red),
+                    const SizedBox(width: 6),
+                    Text('Lixeira',
+                        style: TextStyle(
+                            fontSize: 12, color: hot ? Colors.white : red)),
+                  ],
+                ),
               ),
             ),
           ),
@@ -395,7 +308,7 @@ class _StacksBarState extends State<StacksBar>
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
-          alignment: Alignment.center,
+          width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
             color: _newTarget
@@ -403,13 +316,16 @@ class _StacksBarState extends State<StacksBar>
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(14),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.add, size: 16, color: scheme.primary),
-              const SizedBox(width: 4),
-              const Text('Nova pilha', style: TextStyle(fontSize: 12)),
-            ],
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add, size: 16, color: scheme.primary),
+                const SizedBox(width: 4),
+                const Text('Nova pilha', style: TextStyle(fontSize: 12)),
+              ],
+            ),
           ),
         ),
       ),

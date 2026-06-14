@@ -3,12 +3,19 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'file_text.dart';
 import 'prefs.dart';
 // File e p já vêm de dart:io e package:path acima.
 
 /// LLM local (Ollama) — gratis, no aparelho. Portado do Mac.
 class OllamaService {
   static const _base = 'http://127.0.0.1:11434';
+
+  /// Modelo escolhido nas preferencias (fallback para llama3.2:3b).
+  static String get model {
+    final m = Prefs.i.ollamaModel.value.trim();
+    return m.isEmpty ? 'llama3.2:3b' : m;
+  }
 
   static Future<bool> isRunning() async {
     try {
@@ -22,8 +29,67 @@ class OllamaService {
     }
   }
 
+  /// Modelos ja baixados (nomes como 'llama3.2:3b'). Vazio se offline.
+  static Future<List<String>> listModels() async {
+    try {
+      final c = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+      final req = await c.getUrl(Uri.parse('$_base/api/tags'));
+      final resp = await req.close().timeout(const Duration(seconds: 3));
+      final body = await resp.transform(utf8.decoder).join();
+      c.close();
+      if (resp.statusCode != 200) return [];
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      final models = (json['models'] as List?) ?? [];
+      return models
+          .map((m) => (m as Map<String, dynamic>)['name'] as String?)
+          .whereType<String>()
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Baixa um modelo via /api/pull (NDJSON em stream). [onProgress] recebe
+  /// um status textual e a fracao 0..1. Retorna true ao concluir.
+  static Future<bool> pullModel(String name,
+      {void Function(String status, double progress)? onProgress}) async {
+    try {
+      final c = HttpClient();
+      final req = await c.postUrl(Uri.parse('$_base/api/pull'));
+      req.headers.contentType = ContentType.json;
+      req.add(utf8.encode(jsonEncode({'model': name, 'stream': true})));
+      final resp = await req.close();
+      if (resp.statusCode != 200) {
+        c.close();
+        return false;
+      }
+      var ok = false;
+      await for (final line in resp
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
+        if (line.trim().isEmpty) continue;
+        try {
+          final j = jsonDecode(line) as Map<String, dynamic>;
+          final status = (j['status'] as String?) ?? '';
+          final total = (j['total'] as num?)?.toDouble();
+          final completed = (j['completed'] as num?)?.toDouble();
+          final prog = (total != null && total > 0 && completed != null)
+              ? (completed / total).clamp(0.0, 1.0)
+              : 0.0;
+          onProgress?.call(status, prog);
+          if (status.toLowerCase() == 'success') ok = true;
+        } catch (_) {}
+      }
+      c.close();
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<String?> generate(String prompt,
-      {String model = 'llama3.2:3b', int numPredict = 80}) async {
+      {String? model, int numPredict = 80}) async {
+    model ??= OllamaService.model;
     try {
       final c = HttpClient();
       final req = await c.postUrl(Uri.parse('$_base/api/generate'));
@@ -106,45 +172,69 @@ class AIText {
 /// Cadeia de nomeacao: Ollama (local) -> Claude -> nulo (mantem data).
 class AINamer {
   static Future<String?> titleFor(List<String> paths) async {
-    final names = paths.take(15).map((path) => p.basename(path)).join('\n');
-    final prompt = 'Dê um título curto (3 a 6 palavras, em português, sem '
-        'aspas nem pontuação final) que descreva o tema comum destes '
-        'arquivos. Responda APENAS com o título:\n\n$names';
+    final ctx = StringBuffer();
+    for (final path in paths.take(8)) {
+      ctx.writeln('- ${p.basename(path)}');
+      final snip = await FileText.snippet(path, max: 350);
+      if (snip.isNotEmpty) ctx.writeln('  conteúdo: $snip');
+    }
+    final prompt =
+        'Estes arquivos foram reunidos numa mesma pilha de trabalho. '
+        'Analise os NOMES e os TRECHOS de conteúdo e dê um título curto '
+        '(3 a 6 palavras, em português, sem aspas nem pontuação final) que '
+        'capture o tema/projeto/assunto comum — específico, não genérico. '
+        'Responda APENAS com o título:\n\n$ctx';
 
     if (await OllamaService.isRunning()) {
-      final t = _clean(await OllamaService.generate(prompt));
+      final t = _clean(await OllamaService.generate(prompt, numPredict: 40));
       if (t != null) return t;
     }
     final key = Prefs.i.claudeKey.value.trim();
     if (key.isNotEmpty) {
-      final t = _clean(await ClaudeService.complete(prompt, key));
+      final t = _clean(await ClaudeService.complete(prompt, key, maxTokens: 40));
       if (t != null) return t;
     }
     return null;
   }
 
-  /// Apelido curto para um ARQUIVO (nomes inteligentes). Lê o conteúdo
-  /// de textos para descrever melhor.
+  /// Apelido/nome para um ARQUIVO. Lê o conteúdo real (textos, Office e
+  /// PDF aproximado) para propor um nome específico e descritivo.
   static Future<String?> nameForFile(String path) async {
     final base = p.basename(path);
-    var context = 'Arquivo: $base';
-    final ext = p.extension(path).toLowerCase();
-    if (const {'.txt', '.md', '.csv', '.json', '.log'}.contains(ext)) {
-      try {
-        final c = await File(path).readAsString();
-        context += '\nConteúdo: ${c.length > 500 ? c.substring(0, 500) : c}';
-      } catch (_) {}
+    final folder = p.basename(p.dirname(path));
+    final ext = p.extension(path);
+    final content = await FileText.snippet(path, max: 2500);
+
+    final ctx = StringBuffer()
+      ..writeln('Nome atual: $base')
+      ..writeln('Pasta: $folder')
+      ..writeln(
+          'Tipo: ${ext.isEmpty ? "desconhecido" : ext.substring(1).toUpperCase()}');
+    if (content.isNotEmpty) {
+      ctx
+        ..writeln('Trecho do conteúdo:')
+        ..writeln(content);
     }
-    final prompt = 'Sugira um nome curto e claro (2 a 6 palavras, em '
-        'português, sem extensão, sem aspas, sem barras) que descreva este '
-        'documento pelo conteúdo real. Responda APENAS com o nome:\n\n$context';
+
+    final prompt = content.isEmpty
+        ? 'Não foi possível ler o conteúdo. Pelo nome e tipo, sugira um nome '
+            'de arquivo curto e claro (3 a 6 palavras, em português, sem '
+            'extensão, sem aspas nem barras). Responda APENAS com o nome:\n\n$ctx'
+        : 'Você renomeia documentos. Leia o conteúdo abaixo e proponha um '
+            'nome de arquivo curto, específico e descritivo em português '
+            '(4 a 8 palavras), capturando o ASSUNTO real: tema, '
+            'pessoas/empresas, datas e tipo de documento (contrato, nota, '
+            'relatório, proposta…). Se houver número de documento/contrato/'
+            'nota, inclua. Sem extensão, sem aspas, sem barras, sem pontuação '
+            'final. Responda APENAS com o nome:\n\n$ctx';
+
     if (await OllamaService.isRunning()) {
-      final r = _clean(await OllamaService.generate(prompt, numPredict: 30));
+      final r = _clean(await OllamaService.generate(prompt, numPredict: 40));
       if (r != null) return r;
     }
     final key = Prefs.i.claudeKey.value.trim();
     if (key.isNotEmpty) {
-      final r = _clean(await ClaudeService.complete(prompt, key, maxTokens: 30));
+      final r = _clean(await ClaudeService.complete(prompt, key, maxTokens: 40));
       if (r != null) return r;
     }
     return null;
