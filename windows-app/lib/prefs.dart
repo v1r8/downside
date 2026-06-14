@@ -55,6 +55,9 @@ class Prefs {
   /// Nomes inteligentes dos arquivos (apelido por IA local) — só visual.
   final smartNames = ValueNotifier<bool>(false);
 
+  /// Modelo do Ollama usado para nomear/renomear (ex.: 'llama3.2:3b').
+  final ollamaModel = ValueNotifier<String>('llama3.2:3b');
+
   Future<void> load() async {
     _sp = await SharedPreferences.getInstance();
     final f = _sp.getString('folder');
@@ -76,11 +79,19 @@ class Prefs {
     hoverEnabled.value = _sp.getBool('hoverEnabled') ?? true;
     hoverDelay.value = _sp.getInt('hoverDelay') ?? 600;
     smartNames.value = _sp.getBool('smartNames') ?? false;
+    final om = _sp.getString('ollamaModel');
+    ollamaModel.value = (om != null && om.trim().isNotEmpty) ? om : 'llama3.2:3b';
   }
 
   void setSmartNames(bool v) {
     smartNames.value = v;
     _sp.setBool('smartNames', v);
+  }
+
+  void setOllamaModel(String v) {
+    final m = v.trim().isEmpty ? 'llama3.2:3b' : v.trim();
+    ollamaModel.value = m;
+    _sp.setString('ollamaModel', m);
   }
 
   void setHoverEnabled(bool v) {

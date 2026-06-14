@@ -90,6 +90,14 @@ class PanelController {
   bool visible = false;
   bool pinned = false;
   bool settingsOpen = false;
+
+  /// Verificando atualizacao: baixamos o "sempre no topo" para o diálogo
+  /// do atualizador aparecer na frente, e suspendemos o auto-fechar.
+  bool updating = false;
+
+  /// Chamado ao esconder — usado para fechar a tela de Configurações.
+  VoidCallback? onHidden;
+
   DateTime _shownAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// Geometria atual da janela (lógica) e escala — para o fechamento
@@ -123,10 +131,36 @@ class PanelController {
     if (!visible) return;
     visible = false;
     await windowManager.hide();
+    onHidden?.call();
+  }
+
+  /// Inicia a verificação de atualização garantindo que o diálogo do
+  /// atualizador apareça na frente (baixa o alwaysOnTop) e sem o painel
+  /// se fechar sozinho no meio.
+  Future<void> beginUpdateCheck() async {
+    updating = true;
+    try {
+      await windowManager.setAlwaysOnTop(false);
+    } catch (_) {}
+    try {
+      await autoUpdater.checkForUpdates();
+    } catch (_) {}
+    // Rede de segurança: o normal é restaurar quando o foco volta ao
+    // painel (onWindowFocus). Mas se nenhum diálogo aparecer (já atualizado)
+    // o foco não muda — então destravamos depois de um tempo folgado.
+    Future.delayed(const Duration(seconds: 60), endUpdateCheck);
+  }
+
+  void endUpdateCheck() {
+    if (!updating) return;
+    updating = false;
+    try {
+      windowManager.setAlwaysOnTop(true);
+    } catch (_) {}
   }
 
   void handleBlur() {
-    if (!visible || pinned || settingsOpen) return;
+    if (!visible || pinned || settingsOpen || updating) return;
     if (DateTime.now().difference(_shownAt) <
         const Duration(milliseconds: 400)) {
       return;
@@ -135,8 +169,9 @@ class PanelController {
   }
 
   /// Fecha quando o mouse se afasta além da margem (chamado pelo vigia).
+  /// Vale também nas Configurações (que são fechadas junto).
   void checkAutoHide() {
-    if (!visible || pinned || settingsOpen || bounds == null) return;
+    if (!visible || pinned || updating || bounds == null) return;
     if (DateTime.now().difference(_shownAt) <
         const Duration(milliseconds: 600)) {
       return;
@@ -234,6 +269,12 @@ class _PanelScaffoldState extends State<PanelScaffold>
     );
     panel.showTick.addListener(_onShow);
     DragWatch.active.addListener(_onDragChange);
+    // Ao esconder o painel, fecha a tela de Configurações se estiver aberta.
+    panel.onHidden = () {
+      if (panel.settingsOpen && mounted) {
+        Navigator.of(context).popUntil((r) => r.isFirst);
+      }
+    };
     _initTray();
     _hotCorner = HotCornerService(
       onTrigger: (trigger) => panel.showAt(trigger),
@@ -317,6 +358,13 @@ class _PanelScaffoldState extends State<PanelScaffold>
   }
 
   @override
+  void onWindowFocus() {
+    // Voltou o foco para o painel (ex.: fechou o diálogo de atualização):
+    // restaura o "sempre no topo".
+    panel.endUpdateCheck();
+  }
+
+  @override
   void onTrayIconMouseDown() => panel.showAt(_defaultTrigger());
 
   @override
@@ -333,7 +381,7 @@ class _PanelScaffoldState extends State<PanelScaffold>
         _openSettings();
         break;
       case 'check_updates':
-        unawaited(autoUpdater.checkForUpdates());
+        unawaited(panel.beginUpdateCheck());
         break;
       case 'quit':
         windowManager.destroy();
