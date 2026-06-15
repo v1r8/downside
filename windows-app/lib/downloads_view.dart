@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:watcher/watcher.dart';
 
 import 'clipboard.dart';
+import 'file_card.dart';
 import 'magic_name.dart';
 import 'prefs.dart';
 import 'preview.dart';
@@ -298,7 +299,7 @@ class _DownloadsViewState extends State<DownloadsView> {
           clipBar: e.isClip && _clipBar,
           child: Column(
             children: [
-              _leading(e, 40, scheme),
+              _cardLeading(e, 56, scheme),
               const SizedBox(height: 6),
               Expanded(
                 child: Center(
@@ -506,6 +507,31 @@ class _DownloadsViewState extends State<DownloadsView> {
       Prefs.i.clipboardMark.value == 'badge';
   bool get _clipTint => Prefs.i.clipboardMark.value == 'tint';
   bool get _clipBar => Prefs.i.clipboardMark.value == 'bar';
+
+  /// Carta do item (grade): retângulo opaco com cara de carta, miniatura
+  /// real nas imagens, faixa/ícone na cor do tipo. Selo de clipboard.
+  Widget _cardLeading(_Entry e, double height, ColorScheme scheme) {
+    final card =
+        FileCard(path: e.path, name: e.name, isDir: e.isDir, height: height);
+    if (!e.isClip || !_clipBadge) return card;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        card,
+        Positioned(
+          right: -3,
+          bottom: -3,
+          child: Container(
+            padding: const EdgeInsets.all(2),
+            decoration:
+                BoxDecoration(color: scheme.primary, shape: BoxShape.circle),
+            child: Icon(Icons.content_paste,
+                size: height * 0.22, color: scheme.onPrimary),
+          ),
+        ),
+      ],
+    );
+  }
 
   /// Icone do item, com um pequeno selo de clipboard quando aplicavel.
   Widget _leading(_Entry e, double size, ColorScheme scheme) {
