@@ -16,6 +16,10 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # pdfx baixa o PDFium via CMake com cmake_minimum_required < 3.5; o
+      # CMake 4.x do runner recusa isso. Este env reabilita a compat.
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
     defaults:
       run:
         shell: pwsh
