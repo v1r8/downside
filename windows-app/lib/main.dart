@@ -39,8 +39,9 @@ Future<void> main() async {
   await Window.initialize();
   await Prefs.i.load();
 
-  const options = WindowOptions(
-    size: Size(560, 430),
+  final options = WindowOptions(
+    size: Size(Prefs.i.panelWidth.value, Prefs.i.panelHeight.value),
+    minimumSize: const Size(380, 300),
     skipTaskbar: true,
     alwaysOnTop: true,
     titleBarStyle: TitleBarStyle.hidden,
@@ -56,6 +57,11 @@ Future<void> main() async {
     await windowManager.setAsFrameless();
     await windowManager.setAlwaysOnTop(true);
     await windowManager.setSkipTaskbar(true);
+    // Pode ser redimensionada; o tamanho é lembrado entre sessões.
+    await windowManager.setResizable(true);
+    await windowManager.setMinimumSize(const Size(380, 300));
+    await windowManager.setSize(
+        Size(Prefs.i.panelWidth.value, Prefs.i.panelHeight.value));
     try {
       await Window.setEffect(
         effect: WindowEffect.acrylic,
@@ -104,10 +110,6 @@ class PanelController {
   /// por distância do mouse.
   Rect? bounds;
   double dpr = 1.0;
-
-  /// Distância (px lógicos) que o mouse pode se afastar do painel antes
-  /// de ele fechar sozinho (espelha o hideMargin do Mac).
-  static const double margin = 220;
 
   /// Incrementa a cada abertura — dispara a animação de entrada.
   final ValueNotifier<int> showTick = ValueNotifier<int>(0);
@@ -169,9 +171,11 @@ class PanelController {
   }
 
   /// Fecha quando o mouse se afasta além da margem (chamado pelo vigia).
-  /// Vale também nas Configurações (que são fechadas junto).
+  /// Vale também nas Configurações (que são fechadas junto). Pode ser
+  /// desligado e a distância é configurável.
   void checkAutoHide() {
     if (!visible || pinned || updating || bounds == null) return;
+    if (!Prefs.i.autoHideOnLeave.value) return;
     if (DateTime.now().difference(_shownAt) <
         const Duration(milliseconds: 600)) {
       return;
@@ -179,7 +183,7 @@ class PanelController {
     final c = globalCursorPhysical();
     if (c == null) return;
     final cursorLogical = Offset(c.dx / dpr, c.dy / dpr);
-    if (!bounds!.inflate(margin).contains(cursorLogical)) {
+    if (!bounds!.inflate(Prefs.i.hideMargin.value).contains(cursorLogical)) {
       hide();
     }
   }
@@ -365,6 +369,14 @@ class _PanelScaffoldState extends State<PanelScaffold>
   }
 
   @override
+  void onWindowResized() {
+    // Lembra o tamanho escolhido pelo usuário entre fechar/abrir e
+    // atualiza a geometria usada pelo auto-fechar (distância do mouse).
+    windowManager.getSize().then((s) => Prefs.i.setPanelSize(s.width, s.height));
+    windowManager.getBounds().then((b) => panel.bounds = b);
+  }
+
+  @override
   void onTrayIconMouseDown() => panel.showAt(_defaultTrigger());
 
   @override
@@ -449,6 +461,12 @@ class _PanelScaffoldState extends State<PanelScaffold>
                       ],
                     ),
                     const PreviewLayer(),
+                    // Alça para redimensionar a janela (canto inferior direito).
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: _resizeGrip(scheme),
+                    ),
                   ],
                 ),
               ),
@@ -575,6 +593,25 @@ class _PanelScaffoldState extends State<PanelScaffold>
     );
   }
 
+  /// Alça discreta no canto inferior direito para redimensionar a janela
+  /// (a janela é sem moldura, então oferecemos uma pega própria).
+  Widget _resizeGrip(ColorScheme scheme) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeUpLeftDownRight,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanStart: (_) => windowManager.startResizing(ResizeEdge.bottomRight),
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CustomPaint(
+            painter: _GripPainter(Colors.white.withValues(alpha: 0.28)),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _searchField(ColorScheme scheme) {
     return SizedBox(
       height: 34,
@@ -611,4 +648,28 @@ class _PanelScaffoldState extends State<PanelScaffold>
       icon: Icon(icon),
     );
   }
+}
+
+/// Três tracinhos diagonais — a clássica pega de redimensionar.
+class _GripPainter extends CustomPainter {
+  _GripPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.4
+      ..strokeCap = StrokeCap.round;
+    for (final d in [5.0, 10.0, 15.0]) {
+      canvas.drawLine(
+        Offset(size.width - 2, size.height - d),
+        Offset(size.width - d, size.height - 2),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GripPainter old) => old.color != color;
 }

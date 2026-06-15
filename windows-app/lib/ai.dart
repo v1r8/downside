@@ -152,18 +152,22 @@ class ClaudeService {
   }
 }
 
-/// Texto longo (resumos, palavras-chave): Ollama local -> Claude.
+/// Texto longo (resumos, palavras-chave). Respeita o motor escolhido:
+/// 1=automático (local→Claude), 2=só Claude, 3=só local (Ollama).
 class AIText {
   static Future<String?> complete(String prompt, {int maxTokens = 800}) async {
-    if (await OllamaService.isRunning()) {
+    final engine = Prefs.i.bulkAIEngine.value;
+    if (engine != 2 && await OllamaService.isRunning()) {
       final r = await OllamaService.generate(prompt, numPredict: maxTokens);
       if (r != null && r.trim().isNotEmpty) return r.trim();
     }
-    final key = Prefs.i.claudeKey.value.trim();
-    if (key.isNotEmpty) {
-      final r = await ClaudeService.complete(prompt, key,
-          model: 'claude-sonnet-4-6', maxTokens: maxTokens);
-      if (r != null && r.trim().isNotEmpty) return r.trim();
+    if (engine != 3) {
+      final key = Prefs.i.claudeKey.value.trim();
+      if (key.isNotEmpty) {
+        final r = await ClaudeService.complete(prompt, key,
+            model: 'claude-sonnet-4-6', maxTokens: maxTokens);
+        if (r != null && r.trim().isNotEmpty) return r.trim();
+      }
     }
     return null;
   }
