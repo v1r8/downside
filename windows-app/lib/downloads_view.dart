@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -44,6 +45,10 @@ class _DownloadsViewState extends State<DownloadsView> {
   List<_Entry> _entries = [];
   final Set<String> _selection = {};
   int? _anchor;
+  // Item pressionado que já estava numa seleção múltipla (sem modificador):
+  // a seleção é preservada no down (para permitir arrastar todos) e só
+  // colapsa para ele no up, se NÃO houve arrasto.
+  int? _downIndex;
   StreamSubscription<WatchEvent>? _watchSub;
   Timer? _debounce;
 
@@ -57,6 +62,7 @@ class _DownloadsViewState extends State<DownloadsView> {
     Prefs.i.clipboardEnabled.addListener(_onViewChanged);
     Prefs.i.clipboardMark.addListener(_onViewChanged);
     Prefs.i.smartNames.addListener(_onViewChanged);
+    Prefs.i.cardLightBackground.addListener(_onViewChanged);
     ClipboardMonitor.i.items.addListener(_onViewChanged);
     SmartNameStore.i.names.addListener(_onViewChanged);
     SmartNameStore.i.pending.addListener(_onViewChanged);
@@ -69,6 +75,7 @@ class _DownloadsViewState extends State<DownloadsView> {
     Prefs.i.clipboardEnabled.removeListener(_onViewChanged);
     Prefs.i.clipboardMark.removeListener(_onViewChanged);
     Prefs.i.smartNames.removeListener(_onViewChanged);
+    Prefs.i.cardLightBackground.removeListener(_onViewChanged);
     ClipboardMonitor.i.items.removeListener(_onViewChanged);
     SmartNameStore.i.names.removeListener(_onViewChanged);
     SmartNameStore.i.pending.removeListener(_onViewChanged);
@@ -238,14 +245,18 @@ class _DownloadsViewState extends State<DownloadsView> {
     });
   }
 
-  /// Envolve uma celula com arrastar-para-fora (arquivo real).
+  /// Envolve uma celula com arrastar-para-fora (arquivos reais). Se houver
+  /// multisseleção e este item faz parte dela, arrasta TODOS os
+  /// selecionados (para outros apps ou para formar uma pilha).
   Widget _draggable(_Entry e, Widget child) {
     return DragItemWidget(
       allowedOperations: () => [DropOperation.copy],
       canAddItemToExistingSession: true,
       dragItemProvider: (request) async {
         final item = DragItem();
-        item.add(Formats.fileUri(Uri.file(e.path)));
+        for (final path in _targets(e)) {
+          item.add(Formats.fileUri(Uri.file(path)));
+        }
         return item;
       },
       child: DraggableWidget(child: child),
@@ -449,18 +460,57 @@ class _DownloadsViewState extends State<DownloadsView> {
       onExit: (_) => PreviewController.i.unhover(e.path),
       child: _draggable(
         e,
-        GestureDetector(
-          onTapDown: (_) {
-            PreviewController.i.dismiss();
-            _tap(items, index);
+        // Seleção no pointer-down (imediata) — sem o atraso do
+        // reconhecedor de duplo-clique. O duplo-clique abre.
+        Listener(
+          onPointerDown: (ev) {
+            if (ev.buttons == kPrimaryButton) _pointerDown(items, index, e);
           },
-          onDoubleTap: () => _open(_targets(e)),
-          onSecondaryTapDown: (d) =>
-              _contextMenu(items, index, d.globalPosition),
-          child: child,
+          onPointerUp: (_) => _pointerUp(index, e),
+          onPointerCancel: (_) => _downIndex = null, // virou arrasto
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onDoubleTap: () => _open(_targets(e)),
+            onSecondaryTapDown: (d) =>
+                _contextMenu(items, index, d.globalPosition),
+            child: child,
+          ),
         ),
       ),
     );
+  }
+
+  void _pointerDown(List<_Entry> items, int index, _Entry e) {
+    PreviewController.i.dismiss();
+    final ctrl = HardwareKeyboard.instance.isControlPressed;
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+    _downIndex = null;
+    if (ctrl || shift) {
+      _tap(items, index); // toggle/intervalo, imediato
+    } else if (!_selection.contains(e.path)) {
+      setState(() {
+        _selection
+          ..clear()
+          ..add(e.path);
+        _anchor = index;
+      });
+    } else {
+      // Já selecionado, sem modificador: preserva (permite arrastar a
+      // seleção inteira); colapsa no up só se não arrastar.
+      _downIndex = index;
+    }
+  }
+
+  void _pointerUp(int index, _Entry e) {
+    if (_downIndex == index) {
+      setState(() {
+        _selection
+          ..clear()
+          ..add(e.path);
+        _anchor = index;
+      });
+    }
+    _downIndex = null;
   }
 
   // MARK: helpers

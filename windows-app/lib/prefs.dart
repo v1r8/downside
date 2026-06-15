@@ -78,6 +78,9 @@ class Prefs {
   final clipboardSkipSecretLike = ValueNotifier<bool>(true);
   final clipboardRetentionHours = ValueNotifier<int>(168);
 
+  /// Cartas com fundo claro (branco) — visual mais clean. Senão, escuro.
+  final cardLightBackground = ValueNotifier<bool>(true);
+
   Future<void> load() async {
     _sp = await SharedPreferences.getInstance();
     final f = _sp.getString('folder');
@@ -111,6 +114,12 @@ class Prefs {
     clipboardSkipSecretLike.value =
         _sp.getBool('clipboardSkipSecretLike') ?? true;
     clipboardRetentionHours.value = _sp.getInt('clipboardRetentionHours') ?? 168;
+    cardLightBackground.value = _sp.getBool('cardLightBackground') ?? true;
+  }
+
+  void setCardLightBackground(bool v) {
+    cardLightBackground.value = v;
+    _sp.setBool('cardLightBackground', v);
   }
 
   void setClipboardSkipSecretLike(bool v) {

@@ -180,6 +180,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+          ValueListenableBuilder<bool>(
+            valueListenable: Prefs.i.cardLightBackground,
+            builder: (_, on, __) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('Cartas com fundo claro'),
+              subtitle: const Text(
+                  'Ícones dos arquivos sobre fundo branco — mais clean.'),
+              value: on,
+              onChanged: Prefs.i.setCardLightBackground,
+            ),
+          ),
           const SizedBox(height: 8),
           _sectionTitle('Preview ao pairar'),
           ValueListenableBuilder<bool>(
