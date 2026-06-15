@@ -11,6 +11,7 @@ import 'file_card.dart';
 import 'file_icons.dart';
 import 'holo_card.dart';
 import 'magic_name.dart';
+import 'preview.dart';
 import 'stacks.dart';
 import 'win_shell.dart';
 
@@ -35,14 +36,6 @@ class _StacksBarState extends State<StacksBar>
   String? _runningLabel;
   String? _runningMsg;
   int? _runningMsgId;
-
-  // Arrasto de um CHIP de pilha (Draggable<int>) — diferente do arrasto
-  // de arquivos do sistema (DragWatch). Faz a lixeira aparecer.
-  bool _stackDragging = false;
-
-  // Tipo do último arrasto — preservado durante a SAÍDA para que as zonas
-  // encolham com fluidez (em vez de sumirem de uma vez).
-  bool _lastFileDrag = false;
 
   // Controla a transição contínua (entrada e volta) das zonas de drop.
   late final AnimationController _t;
@@ -89,13 +82,12 @@ class _StacksBarState extends State<StacksBar>
     if (mounted) setState(() {});
   }
 
-  bool get _anyDrag => DragWatch.active.value || _stackDragging;
+  bool get _anyDrag => DragWatch.active.value;
 
-  /// Avança/recua a animação conforme há (ou não) arrasto. Curvas suaves
-  /// nos dois sentidos — sem aparecer/sumir abrupto.
+  /// Avança/recua a animação conforme há (ou não) arrasto. Mesma curva
+  /// nos dois sentidos — entrada e volta são contínuas, sem saltos.
   void _sync() {
     if (_anyDrag) {
-      _lastFileDrag = DragWatch.active.value;
       if (_t.status != AnimationStatus.completed &&
           _t.status != AnimationStatus.forward) {
         _t.forward();
@@ -109,34 +101,36 @@ class _StacksBarState extends State<StacksBar>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final stacks = StacksController.i.stacks.value;
-    final show = _anyDrag || _t.value > 0.001 || stacks.isNotEmpty;
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOut,
-      alignment: Alignment.topCenter,
-      child: !show
-          ? const SizedBox(width: double.infinity)
-          : Padding(
-              padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: double.infinity,
-                    child: AnimatedBuilder(
-                      animation: _t,
-                      builder: (context, _) => _bar(stacks, scheme),
-                    ),
+    // Tudo dentro do AnimatedBuilder: 'show', as zonas e os chips são
+    // reavaliados a cada quadro, então a VOLTA também anima (sem snap).
+    return AnimatedBuilder(
+      animation: _t,
+      builder: (context, _) {
+        final stacks = StacksController.i.stacks.value;
+        final show = _anyDrag || _t.value > 0.001 || stacks.isNotEmpty;
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          alignment: Alignment.topCenter,
+          child: !show
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                          width: double.infinity, child: _bar(stacks, scheme)),
+                      if (_expanded != null && !_anyDrag)
+                        _detail(
+                          stacks.firstWhere((s) => s.id == _expanded),
+                          scheme,
+                        ),
+                    ],
                   ),
-                  if (_expanded != null && !_anyDrag)
-                    _detail(
-                      stacks.firstWhere((s) => s.id == _expanded),
-                      scheme,
-                    ),
-                ],
-              ),
-            ),
+                ),
+        );
+      },
     );
   }
 
@@ -149,7 +143,7 @@ class _StacksBarState extends State<StacksBar>
     final canAddNew = stacks.length < StacksController.maxStacks;
     final showZones = _t.value > 0.001;
     final showTrash = showZones;
-    final showNew = showZones && _lastFileDrag && canAddNew;
+    final showNew = showZones && canAddNew;
 
     int flex(double w) => (w * 1000).round().clamp(1, 1 << 20).toInt();
 
@@ -174,8 +168,12 @@ class _StacksBarState extends State<StacksBar>
   /// Conteúdo da zona aparece/some junto com a largura (opacidade ligada
   /// ao progresso) — a transição fica contínua, sem piscar.
   Widget _zoneFade(double t, Widget child) {
-    return ClipRect(
-      child: Opacity(opacity: t.clamp(0.0, 1.0), child: child),
+    return Padding(
+      // Folga lateral — evita as zonas colarem entre si e nos chips.
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: ClipRect(
+        child: Opacity(opacity: t.clamp(0.0, 1.0), child: child),
+      ),
     );
   }
 
@@ -263,6 +261,7 @@ class _StacksBarState extends State<StacksBar>
         final paths = await readDroppedPaths(event);
         if (paths.isNotEmpty) StacksController.i.addTo(s.id, paths);
         setState(() => _target = null);
+        DragWatch.end();
       },
       child: GestureDetector(
         onTap: () => setState(() => _expanded = active ? null : s.id),
@@ -270,88 +269,70 @@ class _StacksBarState extends State<StacksBar>
       ),
     );
 
-    return Draggable<int>(
-      data: s.id,
-      dragAnchorStrategy: pointerDragAnchorStrategy,
-      onDragStarted: () {
-        setState(() => _stackDragging = true);
-        _sync();
+    // Arrasto REAL do sistema: leva os arquivos da pilha para outros apps
+    // (Explorer, e-mail, etc.). Como sai como fileUri, as zonas internas
+    // (lixeira/nova pilha/fichário) também reagem via DropRegion.
+    return DragItemWidget(
+      allowedOperations: () => [DropOperation.copy],
+      canAddItemToExistingSession: true,
+      dragItemProvider: (request) async {
+        final item = DragItem();
+        for (final path in s.paths) {
+          item.add(Formats.fileUri(Uri.file(path)));
+        }
+        return item;
       },
-      onDragEnd: (_) => _endStackDrag(),
-      onDraggableCanceled: (_, __) => _endStackDrag(),
-      onDragCompleted: _endStackDrag,
-      feedback: Material(
-        color: Colors.transparent,
-        child: Opacity(opacity: 0.9, child: _deck(s.paths, 26, scheme)),
-      ),
-      childWhenDragging: Opacity(opacity: 0.3, child: visual),
-      child: dropTarget,
+      child: DraggableWidget(child: dropTarget),
     );
-  }
-
-  void _endStackDrag() {
-    if (mounted) setState(() => _stackDragging = false);
-    _sync();
-  }
-
-  void _deleteStack(int id) {
-    final list = StacksController.i.stacks.value.where((s) => s.id == id);
-    if (list.isNotEmpty) WinShell.moveToRecycleBin(list.first.paths);
-    StacksController.i.clearStack(id);
   }
 
   Widget _trashZone(ColorScheme scheme) {
     const red = Color(0xFFE5534B);
-    return DragTarget<int>(
-      onWillAcceptWithDetails: (_) => true,
-      onAcceptWithDetails: (d) => _deleteStack(d.data),
-      builder: (context, cand, rej) {
-        final hot = _trashTarget || cand.isNotEmpty;
-        return DropRegion(
-          formats: const [Formats.fileUri],
-          hitTestBehavior: HitTestBehavior.opaque,
-          onDropOver: (_) {
-            DragWatch.ping();
-            if (!_trashTarget) setState(() => _trashTarget = true);
-            return DropOperation.copy;
-          },
-          onDropLeave: (_) {
-            if (_trashTarget) setState(() => _trashTarget = false);
-          },
-          onPerformDrop: (event) async {
-            final paths = await readDroppedPaths(event);
-            if (paths.isNotEmpty) WinShell.moveToRecycleBin(paths);
-            setState(() => _trashTarget = false);
-          },
-          child: DashedBox(
-            color: red.withValues(alpha: hot ? 1 : 0.55),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: hot ? red.withValues(alpha: 0.30) : Colors.transparent,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.delete_outline,
-                        size: 18, color: hot ? Colors.white : red),
-                    const SizedBox(width: 6),
-                    Text('Lixeira',
-                        style: TextStyle(
-                            fontSize: 12, color: hot ? Colors.white : red)),
-                  ],
-                ),
-              ),
+    final hot = _trashTarget;
+    return DropRegion(
+      formats: const [Formats.fileUri],
+      hitTestBehavior: HitTestBehavior.opaque,
+      onDropOver: (_) {
+        DragWatch.ping();
+        if (!_trashTarget) setState(() => _trashTarget = true);
+        return DropOperation.copy;
+      },
+      onDropLeave: (_) {
+        if (_trashTarget) setState(() => _trashTarget = false);
+      },
+      onPerformDrop: (event) async {
+        final paths = await readDroppedPaths(event);
+        if (paths.isNotEmpty) WinShell.moveToRecycleBin(paths);
+        setState(() => _trashTarget = false);
+        DragWatch.end();
+      },
+      child: DashedBox(
+        color: red.withValues(alpha: hot ? 1 : 0.55),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: hot ? red.withValues(alpha: 0.30) : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.delete_outline,
+                    size: 18, color: hot ? Colors.white : red),
+                const SizedBox(width: 6),
+                Text('Lixeira',
+                    style: TextStyle(
+                        fontSize: 12, color: hot ? Colors.white : red)),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -371,6 +352,7 @@ class _StacksBarState extends State<StacksBar>
         final paths = await readDroppedPaths(event);
         if (paths.isNotEmpty) StacksController.i.createWith(paths);
         setState(() => _newTarget = false);
+        DragWatch.end();
       },
       child: DashedBox(
         color: scheme.primary.withValues(alpha: _newTarget ? 1 : 0.55),
@@ -518,7 +500,10 @@ class _StacksBarState extends State<StacksBar>
   /// Output (gerado por IA/ação): chip com ✨ + brilho holográfico.
   Widget _outputChip(FileStack s, String path, ColorScheme scheme) {
     final name = p.basename(path);
-    return Container(
+    return MouseRegion(
+      onEnter: (ev) => PreviewController.i.hover(path, ev.position),
+      onExit: (_) => PreviewController.i.unhover(path),
+      child: Container(
       margin: const EdgeInsets.only(right: 6),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -547,6 +532,7 @@ class _StacksBarState extends State<StacksBar>
             child: Icon(Icons.close, size: 12, color: scheme.onSurfaceVariant),
           ),
         ],
+      ),
       ),
     );
   }
@@ -611,7 +597,11 @@ class _StacksBarState extends State<StacksBar>
   Widget _fileRow(FileStack s, String path, ColorScheme scheme) {
     final name = p.basename(path);
     final renaming = StacksController.i.renaming.value.contains(path);
-    return Padding(
+    return MouseRegion(
+      // Preview ao pairar (igual à lista da pasta).
+      onEnter: (ev) => PreviewController.i.hover(path, ev.position),
+      onExit: (_) => PreviewController.i.unhover(path),
+      child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
@@ -620,10 +610,13 @@ class _StacksBarState extends State<StacksBar>
           Expanded(
             child: renaming
                 ? const MagicName(width: 120)
-                : Text(name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11.5)),
+                : GestureDetector(
+                    onTap: () => launchUrl(Uri.file(path)),
+                    child: Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11.5)),
+                  ),
           ),
           if (!renaming)
             GestureDetector(
@@ -642,6 +635,7 @@ class _StacksBarState extends State<StacksBar>
             child: Icon(Icons.close, size: 14, color: scheme.onSurfaceVariant),
           ),
         ],
+      ),
       ),
     );
   }

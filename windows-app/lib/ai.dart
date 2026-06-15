@@ -246,12 +246,18 @@ class AINamer {
 
   static String? _clean(String? raw) {
     if (raw == null) return null;
-    final line = raw
+    var line = raw
         .split('\n')
         .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '')
+        // remove caracteres de controle (lixo de modelos quebrados)
+        .replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '')
         .trim()
-        .replaceAll(RegExp(r'^["\x27.]+|["\x27.]+$'), '');
+        .replaceAll(RegExp(r'^["\x27.\s]+|["\x27.\s]+$'), '');
     if (line.isEmpty) return null;
+    // Rejeita saídas sem conteúdo real (ex.: "@@@@@", "----", "####"),
+    // que apareciam como lixo no nome — melhor manter o nome original.
+    final letters = RegExp(r'[A-Za-zÀ-ÿ0-9]').allMatches(line).length;
+    if (letters < 2 || letters < line.length * 0.4) return null;
     return line.length > 60 ? line.substring(0, 60) : line;
   }
 }
