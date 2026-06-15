@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import 'file_icons.dart';
+import 'file_text.dart';
 import 'prefs.dart';
 
 class PreviewState {
@@ -90,7 +91,12 @@ class _PreviewCard extends StatelessWidget {
   final String path;
 
   static const _imageExt = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'};
-  static const _textExt = {'.txt', '.md', '.csv', '.json', '.xml', '.log'};
+  static const _textExt = {
+    '.txt', '.md', '.json', '.xml', '.log', '.yaml', '.yml', '.ini',
+    '.dart', '.py', '.js', '.ts', '.html', '.css', '.sql', '.sh'
+  };
+  static const _tableExt = {'.csv', '.tsv'};
+  static const _docExt = {'.pdf', '.docx', '.pptx', '.xlsx'};
 
   @override
   Widget build(BuildContext context) {
@@ -137,8 +143,124 @@ class _PreviewCard extends StatelessWidget {
           fit: BoxFit.contain,
           errorBuilder: (_, __, ___) => _generic(scheme));
     }
+    if (_tableExt.contains(ext)) return _table(scheme);
     if (_textExt.contains(ext)) return _text(scheme);
+    if (_docExt.contains(ext)) return _extracted(scheme);
     return _generic(scheme);
+  }
+
+  /// PDF / Office: mostra o conteúdo extraído (texto aproximado).
+  Widget _extracted(ColorScheme scheme) {
+    return FutureBuilder<String>(
+      future: FileText.snippet(path, max: 1600),
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return Center(
+            child: SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: scheme.onSurfaceVariant),
+            ),
+          );
+        }
+        final text = (snap.data ?? '').trim();
+        if (text.isEmpty) return _generic(scheme);
+        return Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(iconForName(p.basename(path)),
+                      size: 14, color: colorForName(p.basename(path), scheme)),
+                  const SizedBox(width: 6),
+                  Text('Conteúdo',
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Expanded(
+                child: Text(text,
+                    maxLines: 11,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 10.5, height: 1.35)),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// CSV/TSV: mini-tabela (até 30 linhas × 6 colunas).
+  Widget _table(ColorScheme scheme) {
+    return FutureBuilder<List<List<String>>>(
+      future: _readRows(),
+      builder: (context, snap) {
+        final rows = snap.data;
+        if (rows == null || rows.isEmpty) return _generic(scheme);
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var r = 0; r < rows.length; r++)
+                  Row(
+                    children: [
+                      for (final cell in rows[r])
+                        SizedBox(
+                          width: 92,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 3),
+                            child: Text(cell,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: r == 0
+                                        ? FontWeight.bold
+                                        : FontWeight.normal)),
+                          ),
+                        ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<List<List<String>>> _readRows() async {
+    try {
+      final raw = await File(path).readAsString();
+      final lines = raw
+          .split(RegExp(r'\r?\n'))
+          .where((l) => l.trim().isNotEmpty)
+          .take(30)
+          .toList();
+      if (lines.isEmpty) return [];
+      // Detecta o separador pela primeira linha.
+      final first = lines.first;
+      final tabs = '\t'.allMatches(first).length;
+      final semis = ';'.allMatches(first).length;
+      final commas = ','.allMatches(first).length;
+      final sep = (tabs >= semis && tabs >= commas)
+          ? '\t'
+          : (semis >= commas ? ';' : ',');
+      return lines.map((l) => l.split(sep).take(6).toList()).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   Widget _text(ColorScheme scheme) {

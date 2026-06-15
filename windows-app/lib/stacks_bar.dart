@@ -7,6 +7,7 @@ import 'bulk_actions.dart';
 import 'dashed_border.dart';
 import 'drop_util.dart';
 import 'fichario.dart';
+import 'file_card.dart';
 import 'file_icons.dart';
 import 'holo_card.dart';
 import 'magic_name.dart';
@@ -647,36 +648,19 @@ class _StacksBarState extends State<StacksBar>
 
   Widget _deck(List<String> paths, double size, ColorScheme scheme,
       {bool holo = false}) {
-    final shown = paths.take(3).toList();
-    final n = shown.length;
-    final shift = holo ? size * 0.42 : 0.0;
-    return SizedBox(
-      width: shift + size + (n <= 1 ? 0 : (n - 1) * size * 0.32),
-      height: size,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.centerLeft,
-        children: [
-          if (holo)
-            Positioned(
-              left: 0,
-              child: Transform.rotate(
-                angle: -0.18,
-                child: HoloCard(width: size * 0.62, height: size * 0.88),
-              ),
-            ),
-          for (var idx = 0; idx < n; idx++)
-            Positioned(
-              left: shift + idx * size * 0.32,
-              child: Transform.rotate(
-                angle: (idx - (n - 1) / 2) * 0.14,
-                child: Icon(iconForName(p.basename(shown[idx])),
-                    size: size,
-                    color: colorForName(p.basename(shown[idx]), scheme)),
-              ),
-            ),
-        ],
-      ),
+    final deck = FileCardDeck(paths: paths, height: size);
+    if (!holo) return deck;
+    // Carta holográfica (ação em massa) atrás do baralho.
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Transform.rotate(
+          angle: -0.2,
+          child: HoloCard(width: size * 0.6, height: size * 0.86),
+        ),
+        SizedBox(width: size * 0.12),
+        deck,
+      ],
     );
   }
 
