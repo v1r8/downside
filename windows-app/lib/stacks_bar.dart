@@ -11,6 +11,7 @@ import 'file_card.dart';
 import 'file_icons.dart';
 import 'holo_card.dart';
 import 'magic_name.dart';
+import 'prefs.dart';
 import 'preview.dart';
 import 'stacks.dart';
 import 'win_shell.dart';
@@ -56,6 +57,7 @@ class _StacksBarState extends State<StacksBar>
     StacksController.i.stacks.addListener(_onChange);
     StacksController.i.naming.addListener(_repaint);
     StacksController.i.renaming.addListener(_repaint);
+    Prefs.i.cardLightBackground.addListener(_repaint);
     DragWatch.active.addListener(_onChange);
   }
 
@@ -64,6 +66,7 @@ class _StacksBarState extends State<StacksBar>
     StacksController.i.stacks.removeListener(_onChange);
     StacksController.i.naming.removeListener(_repaint);
     StacksController.i.renaming.removeListener(_repaint);
+    Prefs.i.cardLightBackground.removeListener(_repaint);
     DragWatch.active.removeListener(_onChange);
     _t.dispose();
     super.dispose();
@@ -181,7 +184,6 @@ class _StacksBarState extends State<StacksBar>
     final dragging = _anyDrag;
     final active = _expanded == s.id;
     final targeted = _target == s.id;
-    final naming = StacksController.i.naming.value.contains(s.id);
     final visual = AnimatedContainer(
       duration: const Duration(milliseconds: 160),
       margin: const EdgeInsets.only(right: 8),
@@ -216,21 +218,6 @@ class _StacksBarState extends State<StacksBar>
                   Text('${s.paths.length}',
                       style: const TextStyle(
                           fontSize: 12, fontWeight: FontWeight.bold)),
-                  if (!dragging && naming) ...[
-                    const SizedBox(width: 8),
-                    const MagicName(width: 54),
-                  ] else if (!dragging && s.name != null) ...[
-                    const SizedBox(width: 8),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 150),
-                      child: Text(s.name!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 11.5,
-                              color: scheme.onSurfaceVariant)),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -642,20 +629,7 @@ class _StacksBarState extends State<StacksBar>
 
   Widget _deck(List<String> paths, double size, ColorScheme scheme,
       {bool holo = false}) {
-    final deck = FileCardDeck(paths: paths, height: size);
-    if (!holo) return deck;
-    // Carta holográfica (ação em massa) atrás do baralho.
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Transform.rotate(
-          angle: -0.2,
-          child: HoloCard(width: size * 0.6, height: size * 0.86),
-        ),
-        SizedBox(width: size * 0.12),
-        deck,
-      ],
-    );
+    return FileCardDeck(paths: paths, height: size, holo: holo);
   }
 
   Widget _action(
