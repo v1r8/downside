@@ -20,6 +20,7 @@ dependencies:
   path: ^1.9.0
   archive: ^3.6.1
   pdf: ^3.11.0
+  pdfx: ^2.6.0
   flutter_acrylic: ^1.1.4
   shared_preferences: ^2.3.2
   file_selector: ^1.0.3

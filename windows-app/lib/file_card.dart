@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import 'file_icons.dart';
 import 'holo_card.dart';
+import 'pdf_thumb.dart';
 import 'prefs.dart';
 
 const Set<String> _imageExt = {
@@ -44,10 +46,10 @@ class FileCard extends StatelessWidget {
       color = Color.lerp(color, const Color(0xFF3A3A42), 0.6)!;
     }
     final ext = p.extension(name);
-    final isImage = thumbnails &&
-        height >= 34 &&
-        _imageExt.contains(ext.toLowerCase()) &&
-        File(path).existsSync();
+    final lower = ext.toLowerCase();
+    final exists = (thumbnails && height >= 34) ? File(path).existsSync() : false;
+    final isImage = exists && _imageExt.contains(lower);
+    final isPdf = exists && lower == '.pdf';
 
     Widget face;
     if (isImage) {
@@ -57,6 +59,19 @@ class FileCard extends StatelessWidget {
         cacheWidth: 220,
         gaplessPlayback: true,
         errorBuilder: (_, __, ___) => _typeFace(color, ext, light),
+      );
+    } else if (isPdf) {
+      // Miniatura real da 1ª página (cai no rosto de tipo enquanto carrega
+      // ou se falhar — sem spinner, p/ não piscar no baralho).
+      final dpr = MediaQuery.devicePixelRatioOf(context);
+      final rw = (w * dpr).clamp(80, 400).round();
+      face = FutureBuilder<Uint8List?>(
+        future: PdfThumbService.i.thumbnail(path, width: rw),
+        builder: (context, snap) {
+          final bytes = snap.data;
+          if (bytes == null) return _typeFace(color, ext, light);
+          return Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true);
+        },
       );
     } else {
       face = _typeFace(color, ext, light);
