@@ -1,5 +1,6 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -7,6 +8,7 @@ import 'ai.dart';
 import 'clipboard.dart';
 import 'main.dart' show panel;
 import 'prefs.dart';
+import 'smart_names.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -101,30 +103,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _sectionTitle('Cor de destaque'),
           ValueListenableBuilder<Color>(
             valueListenable: Prefs.i.accent,
-            builder: (_, accent, __) => Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (final c in _swatches)
+            builder: (_, accent, __) {
+              final isCustom = !_swatches
+                  .any((c) => c.toARGB32() == accent.toARGB32());
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final c in _swatches)
+                    GestureDetector(
+                      onTap: () => Prefs.i.setAccent(c),
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: c,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: accent.toARGB32() == c.toARGB32()
+                                ? Colors.white
+                                : Colors.transparent,
+                            width: 2.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Cor personalizada (qualquer cor).
                   GestureDetector(
-                    onTap: () => Prefs.i.setAccent(c),
+                    onTap: () => _pickCustomColor(accent),
                     child: Container(
                       width: 30,
                       height: 30,
                       decoration: BoxDecoration(
-                        color: c,
+                        gradient: const SweepGradient(colors: [
+                          Color(0xFFFF0000),
+                          Color(0xFFFFFF00),
+                          Color(0xFF00FF00),
+                          Color(0xFF00FFFF),
+                          Color(0xFF0000FF),
+                          Color(0xFFFF00FF),
+                          Color(0xFFFF0000),
+                        ]),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: accent.toARGB32() == c.toARGB32()
-                              ? Colors.white
-                              : Colors.transparent,
+                          color: isCustom ? Colors.white : Colors.transparent,
                           width: 2.5,
                         ),
                       ),
+                      child: const Icon(Icons.colorize,
+                          size: 14, color: Colors.white),
                     ),
                   ),
-              ],
-            ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 8),
           _sectionTitle('Exibição'),
@@ -228,6 +260,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 8),
+          _sectionTitle('Segurança do clipboard'),
+          ValueListenableBuilder<bool>(
+            valueListenable: Prefs.i.clipboardSkipSecretLike,
+            builder: (_, on, __) => SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('Ignorar textos com cara de segredo'),
+              subtitle: const Text(
+                  'Chaves de API, tokens e senhas não são capturados.'),
+              value: on,
+              onChanged: Prefs.i.setClipboardSkipSecretLike,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 2),
+            child: Text('Guardar o histórico por:',
+                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+          ),
+          ValueListenableBuilder<int>(
+            valueListenable: Prefs.i.clipboardRetentionHours,
+            builder: (_, hours, __) => Wrap(
+              spacing: 8,
+              children: [
+                for (final entry in const {
+                  1: '1 hora',
+                  24: '1 dia',
+                  168: '1 semana',
+                  720: '30 dias',
+                  0: 'Sempre',
+                }.entries)
+                  ChoiceChip(
+                    label: Text(entry.value, style: const TextStyle(fontSize: 11)),
+                    selected: hours == entry.key,
+                    onSelected: (_) =>
+                        Prefs.i.setClipboardRetentionHours(entry.key),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: () {
+                ClipboardMonitor.i.clearAll();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Histórico do clipboard limpo')),
+                );
+              },
+              icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+              label: const Text('Limpar histórico do clipboard'),
+            ),
+          ),
+          const SizedBox(height: 8),
           _sectionTitle('Nomes inteligentes'),
           ValueListenableBuilder<bool>(
             valueListenable: Prefs.i.smartNames,
@@ -240,6 +326,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'no disco não muda. O tipo vira uma etiqueta ao lado.'),
               value: on,
               onChanged: Prefs.i.setSmartNames,
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () {
+                SmartNameStore.i.reset();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Nomes gerados esquecidos')),
+                );
+              },
+              icon: const Icon(Icons.restart_alt, size: 18),
+              label: const Text('Esquecer nomes gerados'),
             ),
           ),
           const SizedBox(height: 8),
@@ -406,6 +505,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (dir != null && dir.isNotEmpty) {
       Prefs.i.setFolder(dir);
     }
+  }
+
+  Future<void> _pickCustomColor(Color current) async {
+    var picked = current;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cor personalizada'),
+        content: SingleChildScrollView(
+          child: ColorPicker(
+            pickerColor: current,
+            onColorChanged: (c) => picked = c,
+            enableAlpha: false,
+            labelTypes: const [],
+            pickerAreaHeightPercent: 0.7,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Usar'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) Prefs.i.setAccent(picked);
   }
 }
 

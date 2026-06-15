@@ -73,6 +73,11 @@ class Prefs {
   final autoHideOnLeave = ValueNotifier<bool>(true);
   final hideMargin = ValueNotifier<double>(220);
 
+  /// Segurança do clipboard: ignorar textos com cara de segredo (chaves,
+  /// tokens, senhas) e por quantas horas guardar o histórico (0 = sempre).
+  final clipboardSkipSecretLike = ValueNotifier<bool>(true);
+  final clipboardRetentionHours = ValueNotifier<int>(168);
+
   Future<void> load() async {
     _sp = await SharedPreferences.getInstance();
     final f = _sp.getString('folder');
@@ -103,6 +108,19 @@ class Prefs {
     bulkAIEngine.value = (_sp.getInt('bulkAIEngine') ?? 1).clamp(1, 3).toInt();
     autoHideOnLeave.value = _sp.getBool('autoHideOnLeave') ?? true;
     hideMargin.value = (_sp.getDouble('hideMargin') ?? 220).clamp(50, 600).toDouble();
+    clipboardSkipSecretLike.value =
+        _sp.getBool('clipboardSkipSecretLike') ?? true;
+    clipboardRetentionHours.value = _sp.getInt('clipboardRetentionHours') ?? 168;
+  }
+
+  void setClipboardSkipSecretLike(bool v) {
+    clipboardSkipSecretLike.value = v;
+    _sp.setBool('clipboardSkipSecretLike', v);
+  }
+
+  void setClipboardRetentionHours(int v) {
+    clipboardRetentionHours.value = v;
+    _sp.setInt('clipboardRetentionHours', v);
   }
 
   void setPanelSize(double w, double h) {

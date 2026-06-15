@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:super_clipboard/super_clipboard.dart';
 
 import 'clipboard_seq.dart';
+import 'prefs.dart';
 
 class ClipItem {
   ClipItem(this.path, this.name, this.date);
@@ -41,7 +42,18 @@ class ClipboardMonitor {
   int _lastSeq = 0;
   bool _loaded = false;
   static const int _maxItems = 50;
-  static const Duration _retention = Duration(days: 30);
+
+  /// Padrões de texto com cara de segredo (chaves/tokens/senhas) — não são
+  /// capturados quando a opção de segurança está ligada.
+  static final List<RegExp> _secretRes = [
+    RegExp(r'\b(sk|pk|rk)-[A-Za-z0-9]{16,}'), // OpenAI/Stripe-like
+    RegExp(r'\bgh[pousr]_[A-Za-z0-9]{20,}'), // GitHub token
+    RegExp(r'\bgithub_pat_[A-Za-z0-9_]{20,}'),
+    RegExp(r'\bAKIA[0-9A-Z]{16}\b'), // AWS access key id
+    RegExp(r'\bxox[baprs]-[A-Za-z0-9-]{10,}'), // Slack
+    RegExp(r'eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{6,}'), // JWT
+    RegExp(r'-----BEGIN [A-Z ]*PRIVATE KEY-----'), // PEM
+  ];
 
   String get _vault {
     final appdata = Platform.environment['APPDATA'] ?? Directory.systemTemp.path;
@@ -87,7 +99,11 @@ class ClipboardMonitor {
     if (reader.canProvide(Formats.plainText)) {
       final text = await reader.readValue(Formats.plainText);
       if (text != null && text.trim().length > 2) {
-        _saveText(text.trim());
+        final trimmed = text.trim();
+        if (Prefs.i.clipboardSkipSecretLike.value && _looksSecret(trimmed)) {
+          return; // não guarda segredos
+        }
+        _saveText(trimmed);
         return;
       }
     }
@@ -126,20 +142,50 @@ class ClipboardMonitor {
     _save();
   }
 
-  /// Expira antigos (30 dias) e limita a 50, apagando os arquivos.
+  /// Expira antigos (retenção configurável; 0 = nunca) e limita a 50,
+  /// apagando os arquivos.
   void _pruneInto(List<ClipItem> list) {
-    final cutoff = DateTime.now().subtract(_retention);
-    list.removeWhere((c) {
-      if (c.date.isBefore(cutoff)) {
-        _tryDelete(c.path);
-        return true;
-      }
-      return false;
-    });
+    final hours = Prefs.i.clipboardRetentionHours.value;
+    if (hours > 0) {
+      final cutoff = DateTime.now().subtract(Duration(hours: hours));
+      list.removeWhere((c) {
+        if (c.date.isBefore(cutoff)) {
+          _tryDelete(c.path);
+          return true;
+        }
+        return false;
+      });
+    }
     while (list.length > _maxItems) {
       final removed = list.removeLast();
       _tryDelete(removed.path);
     }
+  }
+
+  /// Apaga todo o histórico do clipboard (arquivos do cofre + lista).
+  void clearAll() {
+    for (final c in items.value) {
+      _tryDelete(c.path);
+    }
+    items.value = [];
+    _save();
+  }
+
+  bool _looksSecret(String text) {
+    if (text.length > 4000) return false; // documento longo, não um segredo
+    for (final re in _secretRes) {
+      if (re.hasMatch(text)) return true;
+    }
+    // Token único, longo e de alta entropia (sem espaços, letras+dígitos).
+    if (!text.contains(RegExp(r'\s')) &&
+        text.length >= 32 &&
+        text.length <= 200 &&
+        RegExp(r'^[A-Za-z0-9_\-.=+/]+$').hasMatch(text) &&
+        RegExp(r'[0-9]').hasMatch(text) &&
+        RegExp(r'[A-Za-z]').hasMatch(text)) {
+      return true;
+    }
+    return false;
   }
 
   void _tryDelete(String path) {
