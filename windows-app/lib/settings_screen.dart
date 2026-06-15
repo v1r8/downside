@@ -273,6 +273,106 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             onChanged: Prefs.i.setClaudeKey,
           ),
+          const SizedBox(height: 8),
+          _sectionTitle('Ações em massa (pilhas)'),
+          ValueListenableBuilder<int>(
+            valueListenable: Prefs.i.bulkAIEngine,
+            builder: (_, engine, __) => Column(
+              children: [
+                for (final entry in const {
+                  1: 'Automático (local, depois Claude)',
+                  3: 'Somente IA local (Ollama)',
+                  2: 'Somente Claude (nuvem)',
+                }.entries)
+                  RadioListTile<int>(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: Text(entry.value),
+                    value: entry.key,
+                    groupValue: engine,
+                    onChanged: (v) => Prefs.i.setBulkAIEngine(v!),
+                  ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 2),
+            child: Text('Profundidade do resumo:',
+                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+          ),
+          ValueListenableBuilder<int>(
+            valueListenable: Prefs.i.summaryDepth,
+            builder: (_, depth, __) => Wrap(
+              spacing: 8,
+              children: [
+                for (final entry in const {1: 'Curto', 2: 'Denso'}.entries)
+                  ChoiceChip(
+                    label: Text(entry.value, style: const TextStyle(fontSize: 11)),
+                    selected: depth == entry.key,
+                    onSelected: (_) => Prefs.i.setSummaryDepth(entry.key),
+                  ),
+              ],
+            ),
+          ),
+          ValueListenableBuilder<int>(
+            valueListenable: Prefs.i.keywordCount,
+            builder: (_, count, __) => Row(
+              children: [
+                const Text('Palavras-chave', style: TextStyle(fontSize: 12)),
+                Expanded(
+                  child: Slider(
+                    min: 5,
+                    max: 20,
+                    divisions: 15,
+                    value: count.toDouble(),
+                    label: '$count',
+                    onChanged: (v) => Prefs.i.setKeywordCount(v.round()),
+                  ),
+                ),
+                Text('$count',
+                    style:
+                        TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          _sectionTitle('Fechamento'),
+          ValueListenableBuilder<bool>(
+            valueListenable: Prefs.i.autoHideOnLeave,
+            builder: (_, on, __) => Column(
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Fechar quando o mouse se afasta'),
+                  value: on,
+                  onChanged: Prefs.i.setAutoHideOnLeave,
+                ),
+                if (on)
+                  ValueListenableBuilder<double>(
+                    valueListenable: Prefs.i.hideMargin,
+                    builder: (_, margin, __) => Row(
+                      children: [
+                        const Text('Distância', style: TextStyle(fontSize: 12)),
+                        Expanded(
+                          child: Slider(
+                            min: 50,
+                            max: 600,
+                            divisions: 22,
+                            value: margin,
+                            label: '${margin.round()} px',
+                            onChanged: (v) => Prefs.i.setHideMargin(v),
+                          ),
+                        ),
+                        Text('${margin.round()} px',
+                            style: TextStyle(
+                                fontSize: 11, color: scheme.onSurfaceVariant)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
           const SizedBox(height: 16),
           _sectionTitle('Atualizações'),
           ListTile(

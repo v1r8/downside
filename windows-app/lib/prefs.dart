@@ -58,6 +58,21 @@ class Prefs {
   /// Modelo do Ollama usado para nomear/renomear (ex.: 'llama3.2:3b').
   final ollamaModel = ValueNotifier<String>('llama3.2:3b');
 
+  /// Tamanho do painel (lembrado entre fechar/abrir). Mínimos no setter.
+  final panelWidth = ValueNotifier<double>(560);
+  final panelHeight = ValueNotifier<double>(430);
+
+  /// Ações em massa (portado do Mac):
+  /// profundidade do resumo (1=curto, 2=denso), nº de palavras-chave (5–20),
+  /// motor de IA (1=automático local→Claude, 2=só Claude, 3=só local/Ollama).
+  final summaryDepth = ValueNotifier<int>(2);
+  final keywordCount = ValueNotifier<int>(10);
+  final bulkAIEngine = ValueNotifier<int>(1);
+
+  /// Fecha o painel quando o mouse se afasta, e a distância (px) p/ fechar.
+  final autoHideOnLeave = ValueNotifier<bool>(true);
+  final hideMargin = ValueNotifier<double>(220);
+
   Future<void> load() async {
     _sp = await SharedPreferences.getInstance();
     final f = _sp.getString('folder');
@@ -81,6 +96,47 @@ class Prefs {
     smartNames.value = _sp.getBool('smartNames') ?? false;
     final om = _sp.getString('ollamaModel');
     ollamaModel.value = (om != null && om.trim().isNotEmpty) ? om : 'llama3.2:3b';
+    panelWidth.value = (_sp.getDouble('panelWidth') ?? 560).clamp(380, 1400).toDouble();
+    panelHeight.value = (_sp.getDouble('panelHeight') ?? 430).clamp(300, 1200).toDouble();
+    summaryDepth.value = (_sp.getInt('summaryDepth') ?? 2).clamp(1, 2).toInt();
+    keywordCount.value = (_sp.getInt('keywordCount') ?? 10).clamp(5, 20).toInt();
+    bulkAIEngine.value = (_sp.getInt('bulkAIEngine') ?? 1).clamp(1, 3).toInt();
+    autoHideOnLeave.value = _sp.getBool('autoHideOnLeave') ?? true;
+    hideMargin.value = (_sp.getDouble('hideMargin') ?? 220).clamp(50, 600).toDouble();
+  }
+
+  void setPanelSize(double w, double h) {
+    final cw = w.clamp(380.0, 1400.0).toDouble();
+    final ch = h.clamp(300.0, 1200.0).toDouble();
+    panelWidth.value = cw;
+    panelHeight.value = ch;
+    _sp.setDouble('panelWidth', cw);
+    _sp.setDouble('panelHeight', ch);
+  }
+
+  void setSummaryDepth(int v) {
+    summaryDepth.value = v.clamp(1, 2).toInt();
+    _sp.setInt('summaryDepth', summaryDepth.value);
+  }
+
+  void setKeywordCount(int v) {
+    keywordCount.value = v.clamp(5, 20).toInt();
+    _sp.setInt('keywordCount', keywordCount.value);
+  }
+
+  void setBulkAIEngine(int v) {
+    bulkAIEngine.value = v.clamp(1, 3).toInt();
+    _sp.setInt('bulkAIEngine', bulkAIEngine.value);
+  }
+
+  void setAutoHideOnLeave(bool v) {
+    autoHideOnLeave.value = v;
+    _sp.setBool('autoHideOnLeave', v);
+  }
+
+  void setHideMargin(double v) {
+    hideMargin.value = v.clamp(50, 600).toDouble();
+    _sp.setDouble('hideMargin', hideMargin.value);
   }
 
   void setSmartNames(bool v) {

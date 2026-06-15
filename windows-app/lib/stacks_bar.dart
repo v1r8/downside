@@ -24,7 +24,8 @@ class StacksBar extends StatefulWidget {
   State<StacksBar> createState() => _StacksBarState();
 }
 
-class _StacksBarState extends State<StacksBar> {
+class _StacksBarState extends State<StacksBar>
+    with SingleTickerProviderStateMixin {
   int? _expanded;
   int? _target; // chip sob o cursor durante o drop de arquivos
   bool _newTarget = false;
@@ -38,9 +39,26 @@ class _StacksBarState extends State<StacksBar> {
   // de arquivos do sistema (DragWatch). Faz a lixeira aparecer.
   bool _stackDragging = false;
 
+  // Tipo do último arrasto — preservado durante a SAÍDA para que as zonas
+  // encolham com fluidez (em vez de sumirem de uma vez).
+  bool _lastFileDrag = false;
+
+  // Controla a transição contínua (entrada e volta) das zonas de drop.
+  late final AnimationController _t;
+
+  // Pesos de flex: a lixeira é mais estreita que a "Nova pilha".
+  static const double _chipWeight = 100;
+  static const double _trashWeight = 64;
+  static const double _newWeight = 124;
+
   @override
   void initState() {
     super.initState();
+    _t = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+      reverseDuration: const Duration(milliseconds: 340),
+    );
     StacksController.i.stacks.addListener(_onChange);
     StacksController.i.naming.addListener(_repaint);
     StacksController.i.renaming.addListener(_repaint);
@@ -53,6 +71,7 @@ class _StacksBarState extends State<StacksBar> {
     StacksController.i.naming.removeListener(_repaint);
     StacksController.i.renaming.removeListener(_repaint);
     DragWatch.active.removeListener(_onChange);
+    _t.dispose();
     super.dispose();
   }
 
@@ -65,18 +84,34 @@ class _StacksBarState extends State<StacksBar> {
         !StacksController.i.stacks.value.any((s) => s.id == _expanded)) {
       _expanded = null;
     }
+    _sync();
     if (mounted) setState(() {});
   }
 
   bool get _anyDrag => DragWatch.active.value || _stackDragging;
 
+  /// Avança/recua a animação conforme há (ou não) arrasto. Curvas suaves
+  /// nos dois sentidos — sem aparecer/sumir abrupto.
+  void _sync() {
+    if (_anyDrag) {
+      _lastFileDrag = DragWatch.active.value;
+      if (_t.status != AnimationStatus.completed &&
+          _t.status != AnimationStatus.forward) {
+        _t.forward();
+      }
+    } else if (_t.status != AnimationStatus.dismissed &&
+        _t.status != AnimationStatus.reverse) {
+      _t.reverse();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final stacks = StacksController.i.stacks.value;
-    final show = _anyDrag || stacks.isNotEmpty;
+    final show = _anyDrag || _t.value > 0.001 || stacks.isNotEmpty;
     return AnimatedSize(
-      duration: const Duration(milliseconds: 180),
+      duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
       alignment: Alignment.topCenter,
       child: !show
@@ -86,7 +121,13 @@ class _StacksBarState extends State<StacksBar> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(width: double.infinity, child: _bar(stacks, scheme)),
+                  SizedBox(
+                    width: double.infinity,
+                    child: AnimatedBuilder(
+                      animation: _t,
+                      builder: (context, _) => _bar(stacks, scheme),
+                    ),
+                  ),
                   if (_expanded != null && !_anyDrag)
                     _detail(
                       stacks.firstWhere((s) => s.id == _expanded),
@@ -98,35 +139,42 @@ class _StacksBarState extends State<StacksBar> {
     );
   }
 
-  /// A barra preenche toda a largura: em repouso, os chips se dividem o
-  /// espaço; durante o arrasto entram a lixeira (esquerda) e a "Nova
-  /// pilha" (direita). Tudo em Expanded — ocupa a barra inteira.
+  /// A barra preenche toda a largura. Em repouso, os chips se dividem o
+  /// espaço. Durante o arrasto, a lixeira (esquerda) e a "Nova pilha"
+  /// (direita) CRESCEM continuamente (flex animado) empurrando os chips —
+  /// e ENCOLHEM do mesmo jeito ao soltar. Sem saltos.
   Widget _bar(List<FileStack> stacks, ColorScheme scheme) {
-    final fileDrag = DragWatch.active.value;
-    final dragging = fileDrag || _stackDragging;
+    final t = Curves.easeInOutCubic.transform(_t.value);
     final canAddNew = stacks.length < StacksController.maxStacks;
-    final showNew = fileDrag && canAddNew;
+    final showZones = _t.value > 0.001;
+    final showTrash = showZones;
+    final showNew = showZones && _lastFileDrag && canAddNew;
+
+    int flex(double w) => (w * 1000).round().clamp(1, 1 << 20).toInt();
+
     return Row(
       children: [
-        if (dragging) Expanded(child: _fastIn(_trashZone(scheme))),
-        for (final s in stacks) Expanded(child: _chip(s, scheme)),
-        if (showNew) Expanded(child: _fastIn(_newStackZone(scheme))),
+        if (showTrash)
+          Expanded(
+            flex: flex(_trashWeight * t),
+            child: _zoneFade(t, _trashZone(scheme)),
+          ),
+        for (final s in stacks)
+          Expanded(flex: flex(_chipWeight), child: _chip(s, scheme)),
+        if (showNew)
+          Expanded(
+            flex: flex(_newWeight * t),
+            child: _zoneFade(t, _newStackZone(scheme)),
+          ),
       ],
     );
   }
 
-  /// Entrada rápida e responsiva das zonas (fade + leve escala) — sem
-  /// mola lenta nem "salto".
-  Widget _fastIn(Widget child) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 140),
-      curve: Curves.easeOut,
-      builder: (context, t, c) => Opacity(
-        opacity: t,
-        child: Transform.scale(scale: 0.94 + 0.06 * t, child: c),
-      ),
-      child: child,
+  /// Conteúdo da zona aparece/some junto com a largura (opacidade ligada
+  /// ao progresso) — a transição fica contínua, sem piscar.
+  Widget _zoneFade(double t, Widget child) {
+    return ClipRect(
+      child: Opacity(opacity: t.clamp(0.0, 1.0), child: child),
     );
   }
 
@@ -153,31 +201,47 @@ class _StacksBarState extends State<StacksBar> {
           width: targeted ? 1.5 : 1,
         ),
       ),
+      // Conteúdo (ícone empilhado + contador, e o nome) CENTRALIZADO no
+      // retângulo; o chevron fica ancorado no canto direito.
       child: Row(
-        mainAxisSize: dragging ? MainAxisSize.min : MainAxisSize.max,
         children: [
-          _deck(s.paths, 22, scheme, holo: s.hadBulkAction),
-          const SizedBox(width: 8),
-          Text('${s.paths.length}',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-          if (!dragging) ...[
-            const SizedBox(width: 6),
-            if (naming)
-              const MagicName(width: 54)
-            else if (s.name != null)
-              Flexible(
-                child: Text(s.name!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 11.5, color: scheme.onSurfaceVariant)),
-              )
-            else
-              const Spacer(),
-            const SizedBox(width: 2),
-            Icon(active ? Icons.expand_less : Icons.expand_more,
-                size: 16, color: scheme.onSurfaceVariant),
-          ],
+          if (!dragging) const SizedBox(width: 18),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _deck(s.paths, 22, scheme, holo: s.hadBulkAction),
+                  const SizedBox(width: 8),
+                  Text('${s.paths.length}',
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.bold)),
+                  if (!dragging && naming) ...[
+                    const SizedBox(width: 8),
+                    const MagicName(width: 54),
+                  ] else if (!dragging && s.name != null) ...[
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 150),
+                      child: Text(s.name!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              color: scheme.onSurfaceVariant)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          if (!dragging)
+            SizedBox(
+              width: 18,
+              child: Icon(active ? Icons.expand_less : Icons.expand_more,
+                  size: 16, color: scheme.onSurfaceVariant),
+            ),
         ],
       ),
     );
@@ -208,7 +272,10 @@ class _StacksBarState extends State<StacksBar> {
     return Draggable<int>(
       data: s.id,
       dragAnchorStrategy: pointerDragAnchorStrategy,
-      onDragStarted: () => setState(() => _stackDragging = true),
+      onDragStarted: () {
+        setState(() => _stackDragging = true);
+        _sync();
+      },
       onDragEnd: (_) => _endStackDrag(),
       onDraggableCanceled: (_, __) => _endStackDrag(),
       onDragCompleted: _endStackDrag,
@@ -223,6 +290,7 @@ class _StacksBarState extends State<StacksBar> {
 
   void _endStackDrag() {
     if (mounted) setState(() => _stackDragging = false);
+    _sync();
   }
 
   void _deleteStack(int id) {
@@ -418,6 +486,8 @@ class _StacksBarState extends State<StacksBar> {
                 }, scheme),
                 _action(Icons.drive_file_rename_outline, 'Renomear arquivos',
                     () => _runRename(s), scheme),
+                _action(Icons.picture_as_pdf_outlined, 'Gerar PDF',
+                    () => _run(s, 'Gerando PDF…', BulkRunner.makePdf), scheme),
                 _action(Icons.link, 'Baixar links',
                     () => _run(s, 'Baixando…', BulkRunner.downloadLinks), scheme),
                 _action(Icons.summarize_outlined, 'Resumir',
