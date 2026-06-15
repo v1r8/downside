@@ -123,6 +123,19 @@ class FicharioStore {
     _save();
   }
 
+  /// (Re)gera o título pela IA local (Ollama -> Claude) sob demanda.
+  Future<void> regenerateTitle(String id) async {
+    final idx = archived.value.indexWhere((e) => e.id == id);
+    if (idx < 0) return;
+    await _nameWithAI(archived.value[idx]);
+  }
+
+  void deleteMany(Iterable<String> ids) {
+    final set = ids.toSet();
+    archived.value = archived.value.where((e) => !set.contains(e.id)).toList();
+    _save();
+  }
+
   String _dateTitle() {
     final d = DateTime.now();
     String two(int n) => n.toString().padLeft(2, '0');
