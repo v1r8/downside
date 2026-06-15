@@ -455,7 +455,7 @@ class _PanelScaffoldState extends State<PanelScaffold>
                         const StacksBar(),
                         Expanded(
                           child: _showFichario
-                              ? const FicharioView()
+                              ? FicharioView(query: _query)
                               : DownloadsView(query: _query),
                         ),
                       ],
